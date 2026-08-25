@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Maestro de Batallas - The Code Challenge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-gradient: radial-gradient(circle at 50% 0%, #181928 0%, #090a10 100%);
+            --card-bg: rgba(255, 255, 255, 0.04);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --snake-a-color: #10b981;
+            --snake-a-glow: rgba(16, 185, 129, 0.5);
+            --snake-b-color: #a855f7;
+            --snake-b-glow: rgba(168, 85, 247, 0.5);
+            --apple-color: #ef4444;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --font-main: 'Outfit', sans-serif;
+            --font-code: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background: var(--bg-gradient);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 1.5rem 1rem;
+            overflow-x: hidden;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 1.25rem;
+        }
+
+        header h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #a7f3d0 0%, #10b981 50%, #c084fc 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.4rem;
+            letter-spacing: -0.02em;
+        }
+
+        header p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        /* --- BARRA DE PESTAÑAS DE PELEAS --- */
+        .game-tabs-container {
+            display: flex;
+            gap: 0.5rem;
+            max-width: 1150px;
+            width: 100%;
+            margin-bottom: 1rem;
+            overflow-x: auto;
+            padding-bottom: 0.25rem;
+        }
+
+        .tab-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            color: var(--text-secondary);
+            padding: 0.5rem 1rem;
+            border-radius: 12px;
+            font-family: var(--font-main);
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .tab-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+        }
+
+        .tab-btn.active {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%);
+            border-color: rgba(16, 185, 129, 0.5);
+            color: #f8fafc;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+        }
+
+        .tab-btn .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+        }
+
+        /* --- LAYOUT PRINCIPAL Y MULTITABLERO --- */
+        .main-container {
+            display: grid;
+            grid-template-columns: 1fr 360px;
+            gap: 1.5rem;
+            max-width: 1150px;
+            width: 100%;
+        }
+
+        @media (max-width: 950px) {
+            .main-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .canvas-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            padding: 1.5rem;
+            backdrop-filter: blur(16px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 0 35px rgba(16, 185, 129, 0.12);
+        }
+
+        canvas {
+            display: block;
+            background: #08090e;
+        }
+
+        /* VISTA MULTITABLERO */
+        .grid-view-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+            width: 100%;
+        }
+
+        .mini-game-card {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .mini-game-header {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .controls-bar {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1.25rem;
+            width: 100%;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--card-border);
+            color: var(--text-primary);
+            padding: 0.6rem 1.2rem;
+            border-radius: 12px;
+            font-family: var(--font-main);
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border: none;
+            box-shadow: 0 4px 15px var(--snake-a-glow);
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .scoreboard-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 1.25rem;
+            backdrop-filter: blur(16px);
+        }
+
+        .players-vs {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 0.75rem;
+            align-items: center;
+            margin-top: 0.5rem;
+        }
+
+        .player-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 0.75rem;
+            border-radius: 14px;
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--card-border);
+        }
+
+        .player-box.snake-a {
+            border-color: rgba(16, 185, 129, 0.4);
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.1);
+        }
+
+        .player-box.snake-b {
+            border-color: rgba(168, 85, 247, 0.4);
+            box-shadow: 0 0 15px rgba(168, 85, 247, 0.1);
+        }
+
+        .player-name {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+            max-width: 110px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .player-score {
+            font-size: 1.8rem;
+            font-weight: 700;
+            font-family: var(--font-code);
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.3rem 0.85rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .badge-live {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--snake-a-color);
+            margin-right: 0.5rem;
+            box-shadow: 0 0 10px var(--snake-a-color);
+            animation: pulse 1.8s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.8); }
+        }
+
+        .log-box {
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 0.75rem;
+            font-family: var(--font-code);
+            font-size: 0.78rem;
+            max-height: 180px;
+            overflow-y: auto;
+            color: var(--text-secondary);
+        }
+
+        .log-entry { margin-bottom: 0.35rem; line-height: 1.35; }
+        .log-time { color: #64748b; }
+        .log-msg-eat { color: #34d399; font-weight: 600; }
+        .log-msg-move { color: #38bdf8; }
+        .log-msg-error { color: #f87171; }
+
+        .legend {
+            display: flex;
+            gap: 1.25rem;
+            font-size: 0.85rem;
+            margin-top: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .legend-item { display: flex; align-items: center; gap: 0.4rem; }
+        .legend-color { width: 12px; height: 12px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🎮 Dashboard Maestro de Batallas (Multi-Peleas)</h1>
+        <p>Monitoreo independiente en tiempo real de cada batalla por pestañas o vista multitablero.</p>
+    </header>
+
+    <!-- BARRA SUPERIOR DE PESTAÑAS DE PELEAS ACTIVAS -->
+    <div class="game-tabs-container" id="gameTabsBar">
+        <button class="tab-btn active" id="tabAllGames" onclick="selectTab('ALL')">
+            <span class="dot" style="background: #a855f7;"></span> 📺 Vista Multitablero
+        </button>
+    </div>
+
+    <div class="main-container">
+        <div class="canvas-card" id="mainCanvasCard">
+            <div style="width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                <div id="modeBadge" class="badge badge-live">
+                    <span class="status-dot"></span> <span id="activeGameTitle">Selecciona una pelea o espera retadores...</span>
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-secondary);" id="movesText">
+                    Movimientos restantes: 300
+                </div>
+            </div>
+
+            <div class="canvas-wrapper" id="singleCanvasWrapper">
+                <canvas id="gameCanvas" width="510" height="510"></canvas>
+            </div>
+
+            <div class="grid-view-container" id="gridViewWrapper" style="display: none;">
+                <!-- Las miniaturas de batallas se generarán dinámicamente aquí -->
+            </div>
+
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #10b981; box-shadow: 0 0 8px #10b981;"></div> Serpiente A (Jugador 1)
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #a855f7; box-shadow: 0 0 8px #a855f7;"></div> Serpiente B (Jugador 2)
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #ef4444; box-shadow: 0 0 8px #ef4444;"></div> Manzanas (*)
+                </div>
+            </div>
+
+            <div class="controls-bar">
+                <button class="btn btn-primary" id="btnTogglePlay">
+                    <span id="playIcon">⏸️ Pausar Animación</span>
+                </button>
+                <button class="btn" id="btnLoadLog" style="background: rgba(6, 182, 212, 0.2); border-color: rgba(6, 182, 212, 0.4);">📂 Cargar Registro (.log)</button>
+                <input type="file" id="logFileInput" accept=".log,.txt" style="display: none;">
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="scoreboard-card">
+                <h3 style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 0.5rem;">Marcador de Pelea Seleccionada</h3>
+                
+                <div class="players-vs">
+                    <div class="player-box snake-a">
+                        <span class="player-name" id="namePlayerA">Jugador A</span>
+                        <span class="player-score" id="scorePlayerA" style="color: #34d399;">0</span>
+                    </div>
+                    
+                    <span style="font-weight: 700; color: #64748b;">VS</span>
+
+                    <div class="player-box snake-b">
+                        <span class="player-name" id="namePlayerB">Jugador B</span>
+                        <span class="player-score" id="scorePlayerB" style="color: #c084fc;">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="scoreboard-card" style="flex: 1;">
+                <h3 style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 0.5rem;">Registro en Vivo</h3>
+                <div class="log-box" id="logBox">
+                    <div class="log-entry"><span class="log-time">[00:00]</span> Dashboard listo. Transmisión ws://localhost:8765 activa.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let GRID_SIZE = 15;
+        let CELL_SIZE = canvas.width / GRID_SIZE;
+
+        // Estructura de datos aislada por game_id
+        let GAMES = {};
+        let activeGameId = 'ALL'; // 'ALL' para multitablero o 'game_id' específico
+
+        function addLog(msg, type = 'move') {
+            const logBox = document.getElementById('logBox');
+            const timeStr = new Date().toLocaleTimeString().split(' ')[0];
+            const div = document.createElement('div');
+            div.className = 'log-entry';
+            let colorClass = type === 'eat' ? 'log-msg-eat' : (type === 'error' ? 'log-msg-error' : 'log-msg-move');
+            div.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="${colorClass}">${msg}</span>`;
+            logBox.appendChild(div);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        function parseBoardGrid(boardStr) {
+            if (!boardStr || typeof boardStr !== 'string') return null;
+
+            const lines = boardStr.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            if (lines.length === 0) return null;
+
+            let headA = null, headB = null;
+            let bodyA = [], bodyB = [];
+            let apples = [];
+
+            lines.forEach((rawLine, y) => {
+                let clean = rawLine;
+                if (clean.startsWith('|')) clean = clean.slice(1);
+                if (clean.endsWith('|')) clean = clean.slice(0, -1);
+
+                for (let x = 0; x < clean.length; x++) {
+                    const char = clean[x];
+                    if (char === '*') apples.push({x, y});
+                    else if (char === 'A') headA = {x, y};
+                    else if (char === 'a') bodyA.push({x, y});
+                    else if (char === 'B') headB = {x, y};
+                    else if (char === 'b') bodyB.push({x, y});
+                }
+            });
+
+            return {
+                snakeA: headA ? [headA, ...bodyA] : [],
+                snakeB: headB ? [headB, ...bodyB] : [],
+                apples: apples,
+                gridSize: lines.length
+            };
+        }
+
+        function updateGameTabs() {
+            const tabsBar = document.getElementById('gameTabsBar');
+            tabsBar.innerHTML = `
+                <button class="tab-btn ${activeGameId === 'ALL' ? 'active' : ''}" onclick="selectTab('ALL')">
+                    <span class="dot" style="background: #a855f7;"></span> 📺 Vista Multitablero
+                </button>
+            `;
+
+            Object.keys(GAMES).forEach(gId => {
+                const game = GAMES[gId];
+                const btn = document.createElement('button');
+                btn.className = `tab-btn ${activeGameId === gId ? 'active' : ''}`;
+                btn.onclick = () => selectTab(gId);
+                const shortId = gId.length > 8 ? gId.substring(0, 8) + '...' : gId;
+                btn.innerHTML = `<span class="dot"></span> ${game.player_1} vs ${game.player_2} (${shortId})`;
+                tabsBar.appendChild(btn);
+            });
+        }
+
+        function selectTab(gId) {
+            activeGameId = gId;
+            updateGameTabs();
+            renderActiveView();
+        }
+
+        function renderActiveView() {
+            const singleWrapper = document.getElementById('singleCanvasWrapper');
+            const gridWrapper = document.getElementById('gridViewWrapper');
+
+            if (activeGameId === 'ALL') {
+                singleWrapper.style.display = 'none';
+                gridWrapper.style.display = 'grid';
+                renderGridView();
+            } else {
+                singleWrapper.style.display = 'block';
+                gridWrapper.style.display = 'none';
+                renderSingleGame(GAMES[activeGameId]);
+            }
+        }
+
+        function renderSingleGame(game) {
+            if (!game) return;
+
+            GRID_SIZE = game.gridSize || 15;
+            CELL_SIZE = canvas.width / GRID_SIZE;
+
+            document.getElementById('activeGameTitle').textContent = `Pelea: ${game.player_1} vs ${game.player_2} (${game.game_id})`;
+            document.getElementById('namePlayerA').textContent = game.player_1 || 'Jugador 1';
+            document.getElementById('namePlayerB').textContent = game.player_2 || 'Jugador 2';
+            document.getElementById('scorePlayerA').textContent = game.score_1 ?? 0;
+            document.getElementById('scorePlayerB').textContent = game.score_2 ?? 0;
+            document.getElementById('movesText').textContent = `Movimientos restantes: ${game.remaining_moves ?? 300}`;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Cuadrícula
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= GRID_SIZE; i++) {
+                ctx.beginPath();
+                ctx.moveTo(i * CELL_SIZE, 0);
+                ctx.lineTo(i * CELL_SIZE, canvas.height);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(0, i * CELL_SIZE);
+                ctx.lineTo(canvas.width, i * CELL_SIZE);
+                ctx.stroke();
+            }
+
+            // Manzanas
+            (game.apples || []).forEach(a => {
+                let cx = a.x * CELL_SIZE + CELL_SIZE / 2;
+                let cy = a.y * CELL_SIZE + CELL_SIZE / 2;
+                let r = CELL_SIZE / 2.7;
+                ctx.save();
+                ctx.shadowColor = '#ef4444';
+                ctx.shadowBlur = 14;
+                ctx.fillStyle = '#ef4444';
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+
+            // Serpientes
+            drawSnakeOnCtx(ctx, game.snakeA, '#34d399', '#10b981', '#10b981', CELL_SIZE);
+            drawSnakeOnCtx(ctx, game.snakeB, '#c084fc', '#a855f7', '#a855f7', CELL_SIZE);
+        }
+
+        function renderGridView() {
+            const gridWrapper = document.getElementById('gridViewWrapper');
+            gridWrapper.innerHTML = '';
+
+            const gameIds = Object.keys(GAMES);
+            if (gameIds.length === 0) {
+                gridWrapper.innerHTML = `<div style="text-align: center; color: var(--text-secondary); padding: 3rem;">No hay peleas activas. Esperando desafíos...</div>`;
+                return;
+            }
+
+            gameIds.forEach(gId => {
+                const game = GAMES[gId];
+                const card = document.createElement('div');
+                card.className = 'mini-game-card';
+
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'mini-game-header';
+                headerDiv.innerHTML = `
+                    <span>🟢 ${game.player_1} (${game.score_1}) vs ${game.player_2} (${game.score_2})</span>
+                    <span>Turnos: ${game.remaining_moves}</span>
+                `;
+
+                const miniCanvas = document.createElement('canvas');
+                miniCanvas.width = 260;
+                miniCanvas.height = 260;
+                const mCtx = miniCanvas.getContext('2d');
+                const mCell = 260 / (game.gridSize || 15);
+
+                // Dibujar en miniatura
+                mCtx.fillStyle = '#08090e';
+                mCtx.fillRect(0, 0, 260, 260);
+
+                (game.apples || []).forEach(a => {
+                    mCtx.fillStyle = '#ef4444';
+                    mCtx.beginPath();
+                    mCtx.arc(a.x * mCell + mCell/2, a.y * mCell + mCell/2, mCell/2.5, 0, Math.PI * 2);
+                    mCtx.fill();
+                });
+
+                drawSnakeOnCtx(mCtx, game.snakeA, '#34d399', '#10b981', '#10b981', mCell);
+                drawSnakeOnCtx(mCtx, game.snakeB, '#c084fc', '#a855f7', '#a855f7', mCell);
+
+                card.appendChild(headerDiv);
+                card.appendChild(miniCanvas);
+                card.onclick = () => selectTab(gId);
+                gridWrapper.appendChild(card);
+            });
+        }
+
+        function drawSnakeOnCtx(targetCtx, snakeArr, headColor, bodyColor, shadowColor, cellSize) {
+            if (!snakeArr || snakeArr.length === 0) return;
+
+            snakeArr.forEach((seg, index) => {
+                let x = seg.x * cellSize;
+                let y = seg.y * cellSize;
+
+                targetCtx.save();
+                if (index === 0) {
+                    targetCtx.shadowColor = shadowColor;
+                    targetCtx.shadowBlur = 8;
+                    targetCtx.fillStyle = headColor;
+                    targetCtx.beginPath();
+                    targetCtx.roundRect(x + 1, y + 1, cellSize - 2, cellSize - 2, 4);
+                    targetCtx.fill();
+                } else {
+                    let alpha = 1 - (index / (snakeArr.length + 6));
+                    targetCtx.fillStyle = bodyColor;
+                    targetCtx.globalAlpha = Math.max(0.4, alpha);
+                    targetCtx.beginPath();
+                    targetCtx.roundRect(x + 1.5, y + 1.5, cellSize - 3, cellSize - 3, 3);
+                    targetCtx.fill();
+                }
+                targetCtx.restore();
+            });
+        }
+
+        // --- CONEXIÓN EN VIVO WEBSOCKET A RUN.PY ---
+        function connectLiveBroadcaster() {
+            try {
+                const ws = new WebSocket('ws://localhost:8765');
+                ws.onopen = () => {
+                    addLog('🟢 Conectado al transmisor Maestro en vivo (ws://localhost:8765).', 'eat');
+                };
+                ws.onmessage = (evt) => {
+                    try {
+                        const message = JSON.parse(evt.data);
+                        if (message.event === 'your_turn' || message.event === 'game_over') {
+                            const data = message.data || {};
+                            const gId = data.game_id || 'default_game';
+
+                            const parsed = parseBoardGrid(data.board);
+
+                            if (!GAMES[gId]) {
+                                GAMES[gId] = {
+                                    game_id: gId,
+                                    player_1: data.player_1 || 'Jugador 1',
+                                    player_2: data.player_2 || 'Jugador 2',
+                                    score_1: data.score_1 ?? 0,
+                                    score_2: data.score_2 ?? 0,
+                                    remaining_moves: data.remaining_moves ?? 300,
+                                    gridSize: parsed ? parsed.gridSize : 15,
+                                    snakeA: parsed ? parsed.snakeA : [],
+                                    snakeB: parsed ? parsed.snakeB : [],
+                                    apples: parsed ? parsed.apples : []
+                                };
+                                addLog(`🎮 ¡Nueva pelea iniciada! ID: ${gId}`, 'eat');
+                                if (activeGameId === 'ALL' || Object.keys(GAMES).length === 1) {
+                                    activeGameId = gId;
+                                }
+                                updateGameTabs();
+                            } else {
+                                const game = GAMES[gId];
+                                game.player_1 = data.player_1 || game.player_1;
+                                game.player_2 = data.player_2 || game.player_2;
+                                game.score_1 = data.score_1 ?? game.score_1;
+                                game.score_2 = data.score_2 ?? game.score_2;
+                                game.remaining_moves = data.remaining_moves ?? game.remaining_moves;
+                                if (parsed) {
+                                    game.snakeA = parsed.snakeA;
+                                    game.snakeB = parsed.snakeB;
+                                    game.apples = parsed.apples;
+                                }
+                            }
+
+                            if (message.event === 'game_over') {
+                                addLog(`🏁 Pelea finalizada: ${gId}`, 'eat');
+                            } else {
+                                addLog(`⚡ [${gId.substring(0, 6)}] Turno actualizado.`, 'move');
+                            }
+
+                            renderActiveView();
+                        }
+                    } catch (e) {}
+                };
+                ws.onclose = () => {
+                    setTimeout(connectLiveBroadcaster, 3000);
+                };
+            } catch (e) {}
+        }
+
+        // --- CARGADOR DE REGISTROS LOG ---
+        document.getElementById('btnLoadLog').addEventListener('click', () => {
+            document.getElementById('logFileInput').click();
+        });
+
+        document.getElementById('logFileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                parseAndPlayLog(evt.target.result, file.name);
+            };
+            reader.readAsText(file);
+        });
+
+        function parseAndPlayLog(logContent, fileName) {
+            const lines = logContent.split('\n');
+            let events = [];
+            lines.forEach(line => {
+                line = line.trim();
+                if (line.startsWith('< ') || line.startsWith('> ')) {
+                    try {
+                        const parsed = JSON.parse(line.substring(2));
+                        events.push({prefix: line.substring(0, 2), data: parsed});
+                    } catch (err) {}
+                }
+            });
+
+            if (events.length === 0) return;
+
+            const gId = 'LOG_' + fileName.replace('.log', '');
+            GAMES[gId] = {
+                game_id: gId,
+                player_1: 'Jugador 1',
+                player_2: 'Jugador 2',
+                score_1: 0,
+                score_2: 0,
+                remaining_moves: 300,
+                gridSize: 15,
+                snakeA: [],
+                snakeB: [],
+                apples: []
+            };
+
+            activeGameId = gId;
+            updateGameTabs();
+
+            let idx = 0;
+            function stepLog() {
+                if (idx >= events.length) return;
+                const ev = events[idx++];
+                if (ev.prefix === '< ' && (ev.data.event === 'your_turn' || ev.data.event === 'game_over')) {
+                    const data = ev.data.data || {};
+                    const game = GAMES[gId];
+                    game.score_1 = data.score_1 ?? game.score_1;
+                    game.score_2 = data.score_2 ?? game.score_2;
+                    game.remaining_moves = data.remaining_moves ?? game.remaining_moves;
+                    const parsed = parseBoardGrid(data.board);
+                    if (parsed) {
+                        game.snakeA = parsed.snakeA;
+                        game.snakeB = parsed.snakeB;
+                        game.apples = parsed.apples;
+                        renderActiveView();
+                    }
+                }
+                setTimeout(stepLog, 150);
+            }
+            stepLog();
+        }
+
+        connectLiveBroadcaster();
+    </script>
+</body>
+</html>
