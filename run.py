@@ -440,19 +440,35 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
         LAST_MOVES[game_id] = best_trap_move
         return best_trap_move
 
-    # 2. Probar ruta BFS hacia la manzana más cercana con verificación Defensiva de Encierro y Corredores
-    best_apple_path = None
-    min_dist = 999999
+    # 2. Evaluación de Manzanas considerando Carrera contra el Rival (Food Racing) y Trayectoria
+    candidate_apples = []
     for a in apples:
-        d = abs(head_x - a[0]) + abs(head_y - a[1])
-        if d < min_dist:
-            path = bfs_find_path((head_x, head_y), a)
-            if path:
-                min_dist = d
-                best_apple_path = path
+        path = bfs_find_path((head_x, head_y), a)
+        if not path:
+            continue
+        my_d = len(path)
+        opp_d = 999
+        if opp_head:
+            opp_p = bfs_find_path(opp_head, a)
+            if opp_p:
+                opp_d = len(opp_p)
 
-    if best_apple_path:
-        first_move = best_apple_path[0]
+        # Determinar si la manzana es una carrera perdida (el rival llegará antes o al mismo tiempo)
+        is_race_lost = False
+        if opp_head:
+            if side == 'A' and opp_d < my_d:
+                is_race_lost = True
+            elif side != 'A' and opp_d <= my_d:
+                is_race_lost = True
+
+        if not is_race_lost:
+            candidate_apples.append((my_d, a, path))
+
+    # Ordenar manzanas donde ganamos la carrera por la menor distancia a nuestra cabeza
+    candidate_apples.sort(key=lambda x: x[0])
+
+    for _, a, path in candidate_apples:
+        first_move = path[0]
         for dx, dy, move_name, pos in valid_moves:
             if move_name == first_move:
                 space, open_exits = count_escape_corridors(pos, obstacles, width, height)
@@ -461,6 +477,7 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
                 if space >= min(snake_len + 2, 15) and not is_head_danger and not is_choke:
                     LAST_MOVES[game_id] = first_move
                     return first_move
+
 
     # 3. Modo Supervivencia: Intentar seguir la propia cola (Tail-Following)
     if tail_pos != (head_x, head_y):
