@@ -453,18 +453,19 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
             if opp_p:
                 opp_d = len(opp_p)
 
-        # Determinar si la manzana es una carrera perdida (el rival llegará antes o al mismo tiempo)
-        is_race_lost = False
+        # Aplicar penalización suave de distancia (+8 pasos) a manzanas donde el rival está más cerca,
+        # en lugar de descartarlas totalmente para evitar que el bot se enrosque sobre su cola.
+        race_penalty = 0
         if opp_head:
             if side == 'A' and opp_d < my_d:
-                is_race_lost = True
+                race_penalty = 8
             elif side != 'A' and opp_d <= my_d:
-                is_race_lost = True
+                race_penalty = 8
 
-        if not is_race_lost:
-            candidate_apples.append((my_d, a, path))
+        effective_dist = my_d + race_penalty
+        candidate_apples.append((effective_dist, a, path))
 
-    # Ordenar manzanas donde ganamos la carrera por la menor distancia a nuestra cabeza
+    # Ordenar manzanas según su distancia efectiva (distancia real + penalización de carrera)
     candidate_apples.sort(key=lambda x: x[0])
 
     for _, a, path in candidate_apples:
@@ -477,6 +478,7 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
                 if space >= min(snake_len + 2, 15) and not is_head_danger and not is_choke:
                     LAST_MOVES[game_id] = first_move
                     return first_move
+
 
 
     # 3. Modo Supervivencia: Intentar seguir la propia cola (Tail-Following)
