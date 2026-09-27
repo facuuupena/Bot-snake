@@ -183,7 +183,9 @@ async def process_move(websocket, request_data):
     safe_col = clamp_non_negative(raw_col, min_val=0, max_val=max(0, colums))
 
     # 3. Calcular la dirección oficial de Snake ("up", "down", "left", "right") usando BFS + Flood-Fill
-    snake_move = choose_smart_snake_direction(board, side, game_id=game_id)
+    board_size = data.get('board_size')
+    snake_move = choose_smart_snake_direction(
+        board, side, game_id=game_id, board_size=board_size)
 
     move = {
         'game_id': game_id,
@@ -199,21 +201,49 @@ async def process_move(websocket, request_data):
     await send(websocket, 'move', move)
 
 
-def parse_official_snake_board(board_str, my_side='A'):
+GAME_TARGET_DIGITS = {}
+GAME_MULTIPLIERS = {}
+
+
+def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=None):
     """
-    Parsea la cuadrícula oficial de 15x15 del tablero de Snake de The Code Challenge:
+    Parsea la cuadrícula del tablero de Snake de The Code Challenge (v1, v2, v3, v4):
     - 'A' / 'B': Cabezas de las serpientes.
     - 'a' / 'b': Cuerpos de las serpientes.
-    - '*': Comida (manzana).
+    - '*': Comida estándar (v1 / v2).
+    - '1'..'9': Comida numérica en orden cíclico ascendente (v3).
+    - 'x' / 'X': Ítem multiplicador permanente +50 pts (v4).
     - ' ': Espacio libre.
     - '|': Bordes laterales del tablero.
     """
+    width = 15
+    height = 15
+
+    # v2: Parsear board_size dinámico (ej: "14x18" -> rows=14, cols=18)
+    if isinstance(board_size, str) and 'x' in board_size.lower():
+        parts = board_size.lower().split('x')
+        try:
+            parsed_r = int(parts[0].strip())
+            parsed_c = int(parts[1].strip())
+            if parsed_r > 0 and parsed_c > 0:
+                height = parsed_r
+                width = parsed_c
+        except ValueError:
+            pass
+
     if not isinstance(board_str, str) or not board_str:
-        return {'head': (0, 0), 'body': [], 'tail': (0, 0), 'opp_head': None, 'opp_body': [], 'obstacles': set(), 'apples': [(5, 5)], 'width': 15, 'height': 15}
+        return {'head': (0, 0), 'body': [], 'tail': (0, 0), 'opp_head': None, 'opp_body': [], 'obstacles': set(), 'apples': [(5, 5)], 'multipliers': [], 'bad_digits': set(), 'width': width, 'height': height}
 
     lines = [line.strip() for line in board_str.splitlines() if line.strip()]
     if not lines:
-        return {'head': (0, 0), 'body': [], 'tail': (0, 0), 'opp_head': None, 'opp_body': [], 'obstacles': set(), 'apples': [(5, 5)], 'width': 15, 'height': 15}
+        return {'head': (0, 0), 'body': [], 'tail': (0, 0), 'opp_head': None, 'opp_body': [], 'obstacles': set(), 'apples': [(5, 5)], 'multipliers': [], 'bad_digits': set(), 'width': width, 'height': height}
+
+    height = max(height, len(lines))
+    grid_w = 0
+    for l in lines:
+        cl = l.strip('|')
+        grid_w = max(grid_w, len(cl))
+    width = max(width, grid_w)
 
     my_head_char = my_side.upper() if my_side and my_side.upper() in ('A', 'B') else 'A'
     my_body_char = my_head_char.lower()
@@ -226,9 +256,8 @@ def parse_official_snake_board(board_str, my_side='A'):
     opp_body = []
     obstacles = set()
     apples = []
-
-    height = len(lines)
-    width = 0
+    multipliers = []
+    digits_found = {}  # {digit_int: (x, y)}
 
     for y, raw_line in enumerate(lines):
         clean_line = raw_line
@@ -237,11 +266,14 @@ def parse_official_snake_board(board_str, my_side='A'):
         if clean_line.endswith('|'):
             clean_line = clean_line[:-1]
 
-        width = max(width, len(clean_line))
-
         for x, char in enumerate(clean_line):
             if char == '*':
                 apples.append((x, y))
+            elif char in ('x', 'X'):
+                multipliers.append((x, y))
+            elif char.isdigit() and char != '0':
+                digit_val = int(char)
+                digits_found[digit_val] = (x, y)
             elif char == my_head_char:
                 head_pos = (x, y)
             elif char == my_body_char:
@@ -254,10 +286,30 @@ def parse_official_snake_board(board_str, my_side='A'):
                 opp_body.append((x, y))
                 obstacles.add((x, y))
 
+    # v3: Determinar el target_digit objetivo como el menor dígito activo en la grilla
+    target_digit = min(digits_found.keys()) if digits_found else None
+    if target_digit and game_id:
+        GAME_TARGET_DIGITS[game_id] = target_digit
+
+    bad_digits = set()
+    target_apples = []
+
+    if digits_found:
+        for digit_val, pos in digits_found.items():
+            if digit_val == target_digit:
+                target_apples.append(pos)
+            else:
+                bad_digits.add(pos)
+                obstacles.add(pos)  # Dígitos incorrectos actúan como obstáculos mortales (-500 penalización)
+
+    # Combinar lista de objetivos priorizados: dígitos objetivo v3 primero (para miles de pts), luego multiplicadores 'x', luego manzanas *
+    all_targets = target_apples + multipliers + apples
+
+
     if head_pos is None:
         head_pos = (0, 0)
-    if not apples:
-        apples = [(5, 5)]
+    if not all_targets:
+        all_targets = [(min(5, width - 1), min(5, height - 1))]
 
     tail_pos = my_body[-1] if my_body else head_pos
 
@@ -268,7 +320,10 @@ def parse_official_snake_board(board_str, my_side='A'):
         'opp_head': opp_head,
         'opp_body': opp_body,
         'obstacles': obstacles,
-        'apples': apples,
+        'apples': all_targets,
+        'multipliers': multipliers,
+        'bad_digits': bad_digits,
+        'target_digit': target_digit,
         'width': max(1, width),
         'height': max(1, height)
     }
@@ -327,11 +382,12 @@ def count_escape_corridors(start_pos, obstacles, width, height):
                 queue.append((nx, ny))
 
     # Una salida abierta es una casilla accesible que no está pegada a un borde
-    open_exits = sum(1 for rx, ry in reachables if 1 <= rx < width - 1 and 1 <= ry < height - 1)
+    open_exits = sum(1 for rx, ry in reachables if 1 <= rx <
+                     width - 1 and 1 <= ry < height - 1)
     return len(reachables), open_exits
 
 
-def choose_smart_snake_direction(board_str, side='A', game_id=None):
+def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=None):
     """
     Algoritmo de Inteligencia Artificial Avanzada Dual (Ofensivo y Defensivo):
     1. Prevención estricta de giros de 180° sobre su propio cuello.
@@ -340,8 +396,10 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
     4. Evita colisiones de cabeza vulnerables con el rival a menos que seamos más largos.
     5. Modo Supervivencia Seguimiento de Cola (Tail-Following) si la manzana es peligrosa.
     6. Respaldo por Desesperación Inteligente (Smart Panic Tail Escape) si no hay casillas vacías.
+    7. Soporte para reglas v2 (Tablero Variable), v3 (Comida Cíclica 1-9) y v4 (Multiplicadores 'x').
     """
-    parsed = parse_official_snake_board(board_str, side)
+    parsed = parse_official_snake_board(
+        board_str, side, board_size=board_size, game_id=game_id)
     head_x, head_y = parsed['head']
     my_body = parsed['body']
     tail_pos = parsed['tail']
@@ -349,13 +407,15 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
     opp_body = parsed['opp_body']
     obstacles = parsed['obstacles']
     apples = parsed['apples']
+    multipliers_set = set(parsed.get('multipliers', []))
     width = parsed['width']
     height = parsed['height']
 
     snake_len = len(my_body) + 1
     opp_len = len(opp_body) + 1
     last_move = LAST_MOVES.get(game_id)
-    opposite = OPPOSITE_MOVES.get(last_move)
+    opposite = OPPOSITE_MOVES.get(last_move) if isinstance(last_move, str) else None
+
 
     moves = [
         (0, -1, 'up'),
@@ -429,7 +489,8 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
     if opp_head and snake_len >= opp_len:
         for dx, dy, move_name, pos in valid_moves:
             sim_obstacles = set(obstacles) | {pos}
-            opp_space = flood_fill_count(opp_head, sim_obstacles, width, height)
+            opp_space = flood_fill_count(
+                opp_head, sim_obstacles, width, height)
             my_space = flood_fill_count(pos, sim_obstacles, width, height)
 
             if opp_space < opp_len and my_space >= snake_len:
@@ -440,7 +501,7 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
         LAST_MOVES[game_id] = best_trap_move
         return best_trap_move
 
-    # 2. Evaluación de Manzanas considerando Carrera contra el Rival (Food Racing) y Trayectoria
+    # 2. Evaluación de Manzanas considerando Carrera contra el Rival (Food Racing) y Multiplicadores v4 ('x')
     candidate_apples = []
     for a in apples:
         path = bfs_find_path((head_x, head_y), a)
@@ -453,8 +514,7 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
             if opp_p:
                 opp_d = len(opp_p)
 
-        # Aplicar penalización suave de distancia (+8 pasos) a manzanas donde el rival está más cerca,
-        # en lugar de descartarlas totalmente para evitar que el bot se enrosque sobre su cola.
+        # Aplicar penalización suave de distancia (+8 pasos) a manzanas donde el rival está más cerca
         race_penalty = 0
         if opp_head:
             if side == 'A' and opp_d < my_d:
@@ -462,24 +522,28 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
             elif side != 'A' and opp_d <= my_d:
                 race_penalty = 8
 
-        effective_dist = my_d + race_penalty
+        # Bonificación suave a multiplicadores v4 ('x') cuando están cerca (+3 pasos efectivos)
+        multiplier_bonus = 3 if a in multipliers_set else 0
+
+
+        effective_dist = max(1, my_d + race_penalty - multiplier_bonus)
         candidate_apples.append((effective_dist, a, path))
 
-    # Ordenar manzanas según su distancia efectiva (distancia real + penalización de carrera)
+    # Ordenar manzanas según su distancia efectiva (distancia real + penalización de carrera - bonificación multiplicador)
     candidate_apples.sort(key=lambda x: x[0])
 
     for _, a, path in candidate_apples:
         first_move = path[0]
         for dx, dy, move_name, pos in valid_moves:
             if move_name == first_move:
-                space, open_exits = count_escape_corridors(pos, obstacles, width, height)
-                is_head_danger = (pos in opp_next_moves) and (snake_len <= opp_len)
+                space, open_exits = count_escape_corridors(
+                    pos, obstacles, width, height)
+                is_head_danger = (pos in opp_next_moves) and (
+                    snake_len <= opp_len)
                 is_choke = (open_exits <= 1 and space < snake_len * 1.5)
                 if space >= min(snake_len + 2, 15) and not is_head_danger and not is_choke:
                     LAST_MOVES[game_id] = first_move
                     return first_move
-
-
 
     # 3. Modo Supervivencia: Intentar seguir la propia cola (Tail-Following)
     if tail_pos != (head_x, head_y):
@@ -512,7 +576,8 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
     best_score = -999999
 
     for dx, dy, move_name, pos in valid_moves:
-        space, open_exits = count_escape_corridors(pos, obstacles, width, height)
+        space, open_exits = count_escape_corridors(
+            pos, obstacles, width, height)
         border_penalty = 0
         if pos[0] == 0 or pos[0] == width - 1 or pos[1] == 0 or pos[1] == height - 1:
             border_penalty = 2
@@ -525,14 +590,14 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None):
         if open_exits <= 1 and space < snake_len * 1.5:
             choke_penalty = 40
 
-        score = (space * 10) + (open_exits * 5) - border_penalty - head_danger_penalty - choke_penalty
+        score = (space * 10) + (open_exits * 5) - border_penalty - \
+            head_danger_penalty - choke_penalty
         if score > best_score:
             best_score = score
             best_move = move_name
 
     LAST_MOVES[game_id] = best_move
     return best_move
-
 
 
 def get_safe_snake_direction(data, snake_info=None):

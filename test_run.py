@@ -331,5 +331,51 @@ class TestPlay(InTempDirTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(websocket.sent, [])
 
 
+class TestRulesV2V3V4(unittest.TestCase):
+
+    def test_v2_variable_board_size(self):
+        board_str = (
+            "|............|\n"
+            "|...A........|\n"
+            "|...a........|\n"
+            "|...a........|\n"
+            "|...*........|\n"
+        )
+        parsed = run.parse_official_snake_board(board_str, my_side='A', board_size="12x20")
+        self.assertEqual(parsed['width'], 20)
+        self.assertEqual(parsed['height'], 12)
+
+    def test_v3_cyclic_number_food_targeting_and_bad_digits(self):
+        board_str = (
+            "|............|\n"
+            "|...A........|\n"
+            "|.1...2...3..|\n"
+            "|............|\n"
+        )
+        parsed = run.parse_official_snake_board(board_str, my_side='A', game_id='g_v3')
+        # El menor dígito 1 debe ser el objetivo
+        self.assertEqual(parsed['target_digit'], 1)
+        self.assertIn((1, 2), parsed['apples'])  # La casilla del 1 está en los objetivos
+        self.assertIn((5, 2), parsed['bad_digits'])  # El 2 es dígito incorrecto en (5, 2)
+        self.assertIn((9, 2), parsed['bad_digits'])  # El 3 es dígito incorrecto en (9, 2)
+        self.assertIn((5, 2), parsed['obstacles'])  # Dígitos incorrectos se agregan a obstáculos
+
+    def test_v4_multiplier_item_priority(self):
+        board_str = (
+            "|............|\n"
+            "|...A........|\n"
+            "|..x......*..|\n"
+            "|............|\n"
+        )
+        parsed = run.parse_official_snake_board(board_str, my_side='A')
+        self.assertIn((2, 2), parsed['multipliers'])
+        self.assertIn((2, 2), parsed['apples'])  # 'x' se incluye en la lista de objetivos priorizados
+        move = run.choose_smart_snake_direction(board_str, side='A')
+        # Con 'x' en (2,2) y 'A' en (3,1), la dirección hacia 'x' puede ser 'down' o 'left'
+        self.assertIn(move, ('left', 'down'))
+
+
+
 if __name__ == '__main__':
     unittest.main()
+
