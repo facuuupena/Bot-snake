@@ -49,8 +49,12 @@ class InTempDirTestCase(HistoryTestCase):
         self.addCleanup(os.chdir, previous_cwd)
 
     def read_log(self, game_id):
-        with open(os.path.join(self.tmpdir.name, f"game_{game_id}.log")) as f:
+        path = os.path.join(self.tmpdir.name, "logs", f"game_{game_id}.log")
+        if not os.path.exists(path):
+            path = os.path.join(self.tmpdir.name, f"game_{game_id}.log")
+        with open(path) as f:
             return f.read()
+
 
 
 class TestLogEvent(HistoryTestCase):
@@ -106,8 +110,10 @@ class TestWriteGameLog(InTempDirTestCase):
 
         run.write_game_log('g_1')
 
-        self.assertIn('game_g_1.log', os.listdir(self.tmpdir.name))
-        self.assertNotIn('game_g_2.log', os.listdir(self.tmpdir.name))
+        logs_dir = os.path.join(self.tmpdir.name, "logs")
+        self.assertIn('game_g_1.log', os.listdir(logs_dir))
+        self.assertNotIn('game_g_2.log', os.listdir(logs_dir))
+
 
     def test_an_unknown_game_still_produces_a_file(self):
         run.write_game_log('g_unknown')
@@ -383,6 +389,17 @@ class TestRulesV2V3V4(unittest.TestCase):
         self.assertIn((3, 2), parsed['obstacles'])
         self.assertIn((4, 2), parsed['obstacles'])
         self.assertIn((5, 2), parsed['obstacles'])
+
+    def test_v3_cyclic_sequence_advancement(self):
+        # Turno 1: dígitos 1 y 2 en el mapa
+        board_str_1 = "|..A...1...2..|"
+        parsed1 = run.parse_official_snake_board(board_str_1, my_side='A', game_id='g_seq')
+        self.assertEqual(parsed1['target_digit'], 1)
+
+        # Turno 2: el 1 fue consumido por la serpiente y ya no está en el mapa, queda el 2
+        board_str_2 = "|..Aa......2..|"
+        parsed2 = run.parse_official_snake_board(board_str_2, my_side='A', game_id='g_seq')
+        self.assertEqual(parsed2['target_digit'], 2)
 
 
 if __name__ == '__main__':

@@ -22,13 +22,20 @@ def log_action(game_id, message):
     HISTORY.setdefault(game_id, []).append('> ' + json.dumps(message))
 
 
+LOGS_DIR = "logs"
+
+
 def write_game_log(game_id):
     try:
-        with open(f"game_{game_id}.log", "w") as f:
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        filename = f"game_{game_id}.log"
+        filepath = os.path.join(LOGS_DIR, filename)
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write("\n".join(HISTORY.get(game_id, [])) + "\n")
-        print(f"saved game_{game_id}.log")
+        print(f"saved {filepath}")
     except OSError as e:
         print(f"could not write game log: {e}")
+
 
 
 def sanitize_columns(board_str):
@@ -77,6 +84,19 @@ import socket
 import subprocess
 
 
+def ensure_gui_running():
+    """Reabre automáticamente el visualizador Tkinter si el usuario lo cerró sin querer."""
+    global GUI_PROCESS
+    gui_script = os.path.abspath("gui_visualizer.py")
+    if os.path.exists(gui_script) and (GUI_PROCESS is None or GUI_PROCESS.poll() is not None):
+        try:
+            GUI_PROCESS = subprocess.Popen([sys.executable, gui_script])
+            print("🟢 Visualizador Nativo de Escritorio Tkinter iniciado / reabierto")
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"Nota Visualizador Nativo: {e}")
+
+
 async def broadcast_live_event(message_data):
     msg = json.dumps(message_data)
 
@@ -90,6 +110,7 @@ async def broadcast_live_event(message_data):
 
     # 2. Transmitir a Visualizador Nativo de Escritorio Tkinter (localhost:8766)
     def send_to_gui():
+        ensure_gui_running()
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(0.2)
@@ -98,20 +119,11 @@ async def broadcast_live_event(message_data):
         except Exception:
             pass
 
-
     asyncio.get_event_loop().run_in_executor(None, send_to_gui)
 
 
 async def start_live_server():
-    global GUI_PROCESS
-    gui_script = os.path.abspath("gui_visualizer.py")
-    if os.path.exists(gui_script) and GUI_PROCESS is None:
-        try:
-            GUI_PROCESS = subprocess.Popen([sys.executable, gui_script])
-            print("🟢 Visualizador Nativo de Escritorio Tkinter iniciado")
-        except Exception as e:
-            print(f"Nota Visualizador Nativo: {e}")
-
+    ensure_gui_running()
     try:
         async with websockets.serve(live_ws_handler, "localhost", 8765):
             await asyncio.Future()  # mantener servidor abierto
@@ -227,17 +239,19 @@ async def process_move(websocket, request_data):
 
 
 GAME_TARGET_DIGITS = {}
+GAME_ACTIVE_TARGET = {}  # {game_id: {'active': 1, 'prev_digits': set()}}
 GAME_MULTIPLIERS = {}
 
 
 def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=None):
     """
-    Parsea la cuadrícula del tablero de Snake de The Code Challenge (v1, v2, v3, v4):
+    Parsea la cuadrícula del tablero de Snake de The Code Challenge (v1, v2, v3, v4, v5):
     - 'A' / 'B': Cabezas de las serpientes.
     - 'a' / 'b': Cuerpos de las serpientes.
     - '*': Comida estándar (v1 / v2).
     - '1'..'9': Comida numérica en orden cíclico ascendente (v3).
     - 'x' / 'X': Ítem multiplicador permanente +50 pts (v4).
+    - '#': Paredes dinámicas encogibles (v5).
     - ' ': Espacio libre.
     - '|': Bordes laterales del tablero.
     """
@@ -313,9 +327,32 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
             elif char == '#':
                 obstacles.add((x, y))  # v5: Pared dinámica '#' (evitación estricta de penalización -500)
 
+    # v3: Rastreador de Secuencia Global Cíclica (Dígitos 1 a 9)
+    target_digit = None
+    if digits_found:
+        if game_id:
+            state = GAME_ACTIVE_TARGET.setdefault(game_id, {'active': 1, 'prev_digits': set()})
+            curr_active = state['active']
 
-    # v3: Determinar el target_digit objetivo como el menor dígito activo en la grilla
-    target_digit = min(digits_found.keys()) if digits_found else None
+            # Si el dígito activo anterior estaba en el mapa y ya no está, se consumió -> Avanzar secuencia
+            if curr_active in state['prev_digits'] and curr_active not in digits_found:
+                curr_active = (curr_active % 9) + 1
+                state['active'] = curr_active
+
+            # Si el dígito activo no está presente pero hay otros números superiores, sincronizar al menor disponible >= curr_active
+            if curr_active not in digits_found:
+                valid_candidates = [d for d in digits_found.keys() if d >= curr_active]
+                if valid_candidates:
+                    curr_active = min(valid_candidates)
+                else:
+                    curr_active = min(digits_found.keys())
+                state['active'] = curr_active
+
+            target_digit = curr_active
+            state['prev_digits'] = set(digits_found.keys())
+        else:
+            target_digit = min(digits_found.keys())
+
     if target_digit and game_id:
         GAME_TARGET_DIGITS[game_id] = target_digit
 
@@ -328,11 +365,10 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
                 target_apples.append(pos)
             else:
                 bad_digits.add(pos)
-                obstacles.add(pos)  # Dígitos incorrectos actúan como obstáculos mortales (-500 penalización)
+                obstacles.add(pos)  # Dígitos incorrectos en la secuencia actúan como obstáculos mortales (-500 pts)
 
-    # Combinar lista de objetivos priorizados: dígitos objetivo v3 primero (para miles de pts), luego multiplicadores 'x', luego manzanas *
+    # Prioridad estricta de objetivos: Dígito en secuencia v3 primero (miles de pts), luego multiplicadores 'X', luego manzanas *
     all_targets = target_apples + multipliers + apples
-
 
     if head_pos is None:
         head_pos = (0, 0)
@@ -349,6 +385,7 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
         'opp_body': opp_body,
         'obstacles': obstacles,
         'apples': all_targets,
+        'target_pos': target_apples[0] if target_apples else None,
         'multipliers': multipliers,
         'bad_digits': bad_digits,
         'target_digit': target_digit,
@@ -529,6 +566,8 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
         LAST_MOVES[game_id] = best_trap_move
         return best_trap_move
 
+    target_pos = parsed.get('target_pos')
+
     # 2. Evaluación de Manzanas considerando Carrera contra el Rival (Food Racing) y Multiplicadores v4 ('x')
     candidate_apples = []
     for a in apples:
@@ -542,22 +581,26 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
             if opp_p:
                 opp_d = len(opp_p)
 
-        # Aplicar penalización suave de distancia (+8 pasos) a manzanas donde el rival está más cerca
+        is_target_digit = (target_pos and a == target_pos)
+
         race_penalty = 0
-        if opp_head:
-            if side == 'A' and opp_d < my_d:
-                race_penalty = 8
-            elif side != 'A' and opp_d <= my_d:
-                race_penalty = 8
+        target_bonus = 0
+        multiplier_bonus = 0
 
-        # Bonificación suave a multiplicadores v4 ('x') cuando están cerca (+3 pasos efectivos)
-        multiplier_bonus = 3 if a in multipliers_set else 0
+        if is_target_digit:
+            target_bonus = 15  # Priorizar masivamente el dígito activo de la secuencia v3 (miles de pts)
+            if opp_head and opp_d < my_d:
+                # El rival llegará antes al dígito -> Evitar carrera suicida y desviar a multiplicadores
+                race_penalty = 20
+        elif a in multipliers_set:
+            multiplier_bonus = 5
+            if opp_head and opp_d < my_d:
+                race_penalty = 10
 
-
-        effective_dist = max(1, my_d + race_penalty - multiplier_bonus)
+        effective_dist = max(1, my_d + race_penalty - target_bonus - multiplier_bonus)
         candidate_apples.append((effective_dist, a, path))
 
-    # Ordenar manzanas según su distancia efectiva (distancia real + penalización de carrera - bonificación multiplicador)
+    # Ordenar manzanas según su distancia efectiva
     candidate_apples.sort(key=lambda x: x[0])
 
     for _, a, path in candidate_apples:
