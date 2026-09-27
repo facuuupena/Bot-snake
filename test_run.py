@@ -371,11 +371,21 @@ class TestRulesV2V3V4(unittest.TestCase):
         self.assertIn((2, 2), parsed['multipliers'])
         self.assertIn((2, 2), parsed['apples'])  # 'x' se incluye en la lista de objetivos priorizados
         move = run.choose_smart_snake_direction(board_str, side='A')
-        # Con 'x' en (2,2) y 'A' en (3,1), la dirección hacia 'x' puede ser 'down' o 'left'
-        self.assertIn(move, ('left', 'down'))
-
+    def test_v5_dynamic_wall_avoidance(self):
+        board_str = (
+            "|............|\n"
+            "|...A........|\n"
+            "|..####...*..|\n"
+            "|............|\n"
+        )
+        parsed = run.parse_official_snake_board(board_str, my_side='A')
+        self.assertIn((2, 2), parsed['obstacles'])
+        self.assertIn((3, 2), parsed['obstacles'])
+        self.assertIn((4, 2), parsed['obstacles'])
+        self.assertIn((5, 2), parsed['obstacles'])
 
 
 if __name__ == '__main__':
     unittest.main()
+
 

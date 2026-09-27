@@ -72,27 +72,52 @@ async def live_ws_handler(websocket):
         LIVE_CLIENTS.discard(websocket)
 
 
+GUI_PROCESS = None
+import socket
+import subprocess
+
+
 async def broadcast_live_event(message_data):
-    if not LIVE_CLIENTS:
-        return
     msg = json.dumps(message_data)
-    for client in list(LIVE_CLIENTS):
+
+    # 1. Transmitir a visualizador web si hay clientes abiertos
+    if LIVE_CLIENTS:
+        for client in list(LIVE_CLIENTS):
+            try:
+                await client.send(msg)
+            except Exception:
+                LIVE_CLIENTS.discard(client)
+
+    # 2. Transmitir a Visualizador Nativo de Escritorio Tkinter (localhost:8766)
+    def send_to_gui():
         try:
-            await client.send(msg)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.2)
+                s.connect(("localhost", 8766))
+                s.sendall((msg + "\n").encode('utf-8'))
         except Exception:
-            LIVE_CLIENTS.discard(client)
+            pass
+
+
+    asyncio.get_event_loop().run_in_executor(None, send_to_gui)
 
 
 async def start_live_server():
+    global GUI_PROCESS
+    gui_script = os.path.abspath("gui_visualizer.py")
+    if os.path.exists(gui_script) and GUI_PROCESS is None:
+        try:
+            GUI_PROCESS = subprocess.Popen([sys.executable, gui_script])
+            print("🟢 Visualizador Nativo de Escritorio Tkinter iniciado")
+        except Exception as e:
+            print(f"Nota Visualizador Nativo: {e}")
+
     try:
         async with websockets.serve(live_ws_handler, "localhost", 8765):
-            print("🟢 Visualizador en vivo activo en ws://localhost:8765")
-            visualizer_path = os.path.abspath("visualizer.html")
-            if os.path.exists(visualizer_path):
-                webbrowser.open(f"file://{visualizer_path}")
             await asyncio.Future()  # mantener servidor abierto
     except Exception as e:
         print(f"Nota: Servidor de transmisión local: {e}")
+
 
 
 async def send(websocket, action, data):
@@ -282,9 +307,12 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
             elif char == opp_head_char:
                 opp_head = (x, y)
                 obstacles.add((x, y))
-            elif char in (opp_body_char, '#'):
+            elif char == opp_body_char:
                 opp_body.append((x, y))
                 obstacles.add((x, y))
+            elif char == '#':
+                obstacles.add((x, y))  # v5: Pared dinámica '#' (evitación estricta de penalización -500)
+
 
     # v3: Determinar el target_digit objetivo como el menor dígito activo en la grilla
     target_digit = min(digits_found.keys()) if digits_found else None
