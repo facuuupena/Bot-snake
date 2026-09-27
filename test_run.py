@@ -401,6 +401,25 @@ class TestRulesV2V3V4(unittest.TestCase):
         parsed2 = run.parse_official_snake_board(board_str_2, my_side='A', game_id='g_seq')
         self.assertEqual(parsed2['target_digit'], 2)
 
+    def test_high_digit_vs_low_digit_multiplier_priority(self):
+        # 1. Con dígito bajo 1 y multiplicador X cerca -> Preferir multiplicador X
+        board_low = (
+            "|............|\n"
+            "|..X..A...1..|\n"
+            "|............|\n"
+        )
+        move_low = run.choose_smart_snake_direction(board_low, side='A', game_id='g_prio_low')
+        self.assertEqual(move_low, 'left')
+
+        # 2. Con dígito alto 7 cercano (4 casillas) y multiplicador X cerca -> Preferir dígito alto 7
+        board_high = (
+            "|............|\n"
+            "|..X..A...7..|\n"
+            "|............|\n"
+        )
+        move_high = run.choose_smart_snake_direction(board_high, side='A', game_id='g_prio_high')
+        self.assertEqual(move_high, 'right')
+
 
 if __name__ == '__main__':
     unittest.main()

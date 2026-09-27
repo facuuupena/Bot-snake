@@ -567,6 +567,7 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
         return best_trap_move
 
     target_pos = parsed.get('target_pos')
+    target_digit = parsed.get('target_digit')
 
     # 2. Evaluación de Manzanas considerando Carrera contra el Rival (Food Racing) y Multiplicadores v4 ('x')
     candidate_apples = []
@@ -588,16 +589,32 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
         multiplier_bonus = 0
 
         if is_target_digit:
-            target_bonus = 15  # Priorizar masivamente el dígito activo de la secuencia v3 (miles de pts)
-            if opp_head and opp_d < my_d:
-                # El rival llegará antes al dígito -> Evitar carrera suicida y desviar a multiplicadores
-                race_penalty = 20
+            if target_digit and target_digit in (1, 2, 3):
+                # Dígitos bajos (1, 2, 3): Dan muy pocos puntos base.
+                # Priorizar multiplicadores 'X' para aumentar el multiplicador al inicio.
+                target_bonus = 3
+                if my_d <= 2:
+                    target_bonus = 12  # Si está pegado a la cabeza, comerlo
+            else:
+                # Dígitos altos (4, 5, 6, 7, 8, 9): Otorga MILES de puntos.
+                # Si está CERCA (my_d <= 7), priorizarlo masivamente y NUNCA ignorarlo.
+                if my_d <= 7:
+                    target_bonus = 25
+                else:
+                    target_bonus = 15
+
+                if opp_head and opp_d < my_d:
+                    # El rival llegará antes al dígito alto -> Aplicar penalización para no perder tiempo
+                    race_penalty = 15
+
         elif a in multipliers_set:
-            multiplier_bonus = 5
+            multiplier_bonus = 10  # Bonificación fuerte a multiplicadores 'X'
+            if target_digit and target_digit in (1, 2, 3):
+                multiplier_bonus = 20  # Si el dígito activo es bajo (1..3), ir con máxima prioridad a por 'X'
             if opp_head and opp_d < my_d:
                 race_penalty = 10
 
-        effective_dist = max(1, my_d + race_penalty - target_bonus - multiplier_bonus)
+        effective_dist = my_d + race_penalty - target_bonus - multiplier_bonus
         candidate_apples.append((effective_dist, a, path))
 
     # Ordenar manzanas según su distancia efectiva

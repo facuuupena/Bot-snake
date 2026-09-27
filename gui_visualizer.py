@@ -8,27 +8,30 @@ from tkinter import ttk
 class NativeSnakeVisualizer:
     def __init__(self, root):
         self.root = root
-        self.root.title("🎮 Snake Bot - Visualizador Nativo Fluido (Sin Parpadeo)")
-        self.root.geometry("1100x750")
+        self.root.title("🎮 Snake Bot - Visualizador Nativo Fluido (Control de Partidas)")
+        self.root.geometry("1150x780")
         self.root.configure(bg="#121212")
 
         self.games = {}  # {game_id: game_state_dict}
         self.active_game_id = "GRID"  # "GRID" o game_id específico
 
-        # Estructura persistente para evitar destruir y recrear widgets (Cero Parpadeo / Flickering)
-        self.card_widgets = {}  # {game_id: {'frame': card, 'canvas': canvas, 'lbl_title': label, 'lbl_info': label}}
-        self.tab_buttons = {}   # {game_id: button}
+        # Estructuras persistentes de UI
+        self.card_widgets = {}  # {game_id: {'frame': card, 'canvas': canvas, ...}}
+        self.tab_frames = {}    # {game_id: frame_contenedor_tab}
+
+        self.auto_clean_var = tk.BooleanVar(value=False)
 
         self._setup_ui()
         self._start_ipc_server()
 
     def _setup_ui(self):
-        # 1. Barra Superior de Control y Pestañas de Batallas
-        self.top_frame = tk.Frame(self.root, bg="#1E1E1E", height=50)
-        self.top_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+        # 1. Barra Superior de Control
+        self.top_bar = tk.Frame(self.root, bg="#1E1E1E", height=50)
+        self.top_bar.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
 
+        # Botón Vista Multitablero
         self.btn_grid = tk.Button(
-            self.top_frame,
+            self.top_bar,
             text="📺 Vista Multitablero",
             font=("Segoe UI", 10, "bold"),
             bg="#00E5FF",
@@ -36,14 +39,47 @@ class NativeSnakeVisualizer:
             activebackground="#00B2CC",
             activeforeground="#000000",
             relief=tk.FLAT,
-            padx=12,
+            padx=10,
             pady=4,
             command=lambda: self.select_game("GRID")
         )
         self.btn_grid.pack(side=tk.LEFT, padx=5, pady=5)
 
-        self.tabs_container = tk.Frame(self.top_frame, bg="#1E1E1E")
-        self.tabs_container.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Botón Limpiar Terminadas
+        self.btn_clean_finished = tk.Button(
+            self.top_bar,
+            text="🧹 Limpiar Terminadas",
+            font=("Segoe UI", 9, "bold"),
+            bg="#333333",
+            fg="#FFD700",
+            activebackground="#FFD700",
+            activeforeground="#000000",
+            relief=tk.FLAT,
+            padx=8,
+            pady=4,
+            command=self.clear_finished_games
+        )
+        self.btn_clean_finished.pack(side=tk.LEFT, padx=3, pady=5)
+
+        # Botón Limpiar Todo
+        self.btn_clean_all = tk.Button(
+            self.top_bar,
+            text="🗑️ Limpiar Todo",
+            font=("Segoe UI", 9, "bold"),
+            bg="#333333",
+            fg="#FF5252",
+            activebackground="#FF5252",
+            activeforeground="#FFFFFF",
+            relief=tk.FLAT,
+            padx=8,
+            pady=4,
+            command=self.clear_all_games
+        )
+        self.btn_clean_all.pack(side=tk.LEFT, padx=3, pady=5)
+
+        # Contenedor de Pestañas de Batallas
+        self.tabs_container = tk.Frame(self.top_bar, bg="#1E1E1E")
+        self.tabs_container.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
         # 2. Leyenda explicativa superior
         legend_frame = tk.Frame(self.root, bg="#181818", pady=3)
@@ -73,7 +109,7 @@ class NativeSnakeVisualizer:
         # 4. Barra de Estado Inferior
         self.status_bar = tk.Label(
             self.root,
-            text="🟢 Servidor de renderizado fluido listo. Esperando eventos de juego...",
+            text="🟢 Servidor listo. Haz clic en las pestañas o en ❌ para cerrar peleas individuales.",
             font=("Segoe UI", 10),
             bg="#1E1E1E",
             fg="#AAAAAA",
@@ -88,13 +124,49 @@ class NativeSnakeVisualizer:
         self._update_tab_buttons_style()
         self.rebuild_layout()
 
+    def remove_game(self, game_id):
+        """Elimina una partida individual de la vista y limpia sus recursos."""
+        if game_id in self.games:
+            del self.games[game_id]
+
+        if game_id in self.tab_frames:
+            self.tab_frames[game_id].destroy()
+            del self.tab_frames[game_id]
+
+        if game_id in self.card_widgets:
+            self.card_widgets[game_id]['frame'].destroy()
+            del self.card_widgets[game_id]
+
+        # Si la partida cerrada era la activa, volver a GRID o a otra disponible
+        if self.active_game_id == game_id:
+            if self.games:
+                self.active_game_id = list(self.games.keys())[0]
+            else:
+                self.active_game_id = "GRID"
+
+        self.update_tabs()
+        self.rebuild_layout()
+
+    def clear_finished_games(self):
+        """Borra todas las partidas que hayan finalizado (game_over)."""
+        finished_ids = [g_id for g_id, g_data in self.games.items() if g_data.get('finished')]
+        for g_id in finished_ids:
+            self.remove_game(g_id)
+
+    def clear_all_games(self):
+        """Borra todas las partidas del visualizador."""
+        all_ids = list(self.games.keys())
+        for g_id in all_ids:
+            self.remove_game(g_id)
+
     def _update_tab_buttons_style(self):
         self.btn_grid.config(
             bg="#00E5FF" if self.active_game_id == "GRID" else "#2D2D2D",
             fg="#000000" if self.active_game_id == "GRID" else "#FFFFFF"
         )
-        for g_id, btn in self.tab_buttons.items():
+        for g_id, tab_info in self.tab_frames.items():
             is_act = (g_id == self.active_game_id)
+            btn = tab_info['btn']
             btn.config(
                 bg="#00E5FF" if is_act else "#2D2D2D",
                 fg="#000000" if is_act else "#FFFFFF",
@@ -102,27 +174,53 @@ class NativeSnakeVisualizer:
             )
 
     def update_tabs(self):
-        # Crear nuevos botones de pestaña solo si no existen
+        # Crear nuevos botones de pestaña con su propio botón ❌ de cierre
         for g_id, g_data in list(self.games.items()):
-            if g_id not in self.tab_buttons:
+            if g_id not in self.tab_frames:
                 p1 = g_data.get('player_1', 'P1')
                 p2 = g_data.get('player_2', 'P2')
                 short_id = g_id[:6]
                 label_text = f"🎮 {p1} vs {p2} ({short_id})"
 
+                tf = tk.Frame(self.tabs_container, bg="#2D2D2D", bd=1, relief=tk.FLAT)
+                tf.pack(side=tk.LEFT, padx=3)
+
                 btn = tk.Button(
-                    self.tabs_container,
+                    tf,
                     text=label_text,
                     font=("Segoe UI", 9),
                     bg="#2D2D2D",
                     fg="#FFFFFF",
                     relief=tk.FLAT,
-                    padx=8,
+                    padx=6,
                     pady=2,
                     command=lambda gid=g_id: self.select_game(gid)
                 )
-                btn.pack(side=tk.LEFT, padx=3)
-                self.tab_buttons[g_id] = btn
+                btn.pack(side=tk.LEFT)
+
+                btn_close = tk.Button(
+                    tf,
+                    text="❌",
+                    font=("Segoe UI", 8),
+                    bg="#2D2D2D",
+                    fg="#FF5252",
+                    activebackground="#FF5252",
+                    activeforeground="#FFFFFF",
+                    relief=tk.FLAT,
+                    padx=4,
+                    pady=2,
+                    command=lambda gid=g_id: self.remove_game(gid)
+                )
+                btn_close.pack(side=tk.LEFT)
+
+                self.tab_frames[g_id] = {'container': tf, 'btn': btn, 'btn_close': btn_close}
+
+            # Actualizar título de pestaña si terminó
+            if g_data.get('finished') and g_id in self.tab_frames:
+                p1 = g_data.get('player_1', 'P1')
+                p2 = g_data.get('player_2', 'P2')
+                short_id = g_id[:6]
+                self.tab_frames[g_id]['btn'].config(text=f"🏁 {p1} vs {p2} ({short_id})")
 
         self._update_tab_buttons_style()
 
@@ -167,13 +265,32 @@ class NativeSnakeVisualizer:
         header = tk.Frame(card, bg="#252525")
         header.pack(fill=tk.X, padx=2, pady=2)
 
-        lbl_title = tk.Label(header, text="", font=("Segoe UI", 11, "bold"), bg="#252525", fg="#00E5FF")
-        lbl_title.pack(side=tk.TOP, anchor="w", padx=5, pady=1)
+        header_top = tk.Frame(header, bg="#252525")
+        header_top.pack(fill=tk.X)
+
+        lbl_title = tk.Label(header_top, text="", font=("Segoe UI", 11, "bold"), bg="#252525", fg="#00E5FF")
+        lbl_title.pack(side=tk.LEFT, anchor="w", padx=5, pady=1)
+
+        # Botón para cerrar esta partida específica desde la cabecera
+        btn_close_card = tk.Button(
+            header_top,
+            text="❌ Cerrar Pelea",
+            font=("Segoe UI", 9, "bold"),
+            bg="#333333",
+            fg="#FF5252",
+            activebackground="#FF5252",
+            activeforeground="#FFFFFF",
+            relief=tk.FLAT,
+            padx=8,
+            pady=1,
+            command=lambda gid=g_id: self.remove_game(gid)
+        )
+        btn_close_card.pack(side=tk.RIGHT, padx=5)
 
         lbl_info = tk.Label(header, text="", font=("Segoe UI", 9), bg="#252525", fg="#CCCCCC")
         lbl_info.pack(side=tk.TOP, anchor="w", padx=5, pady=1)
 
-        # Persistent Canvas widget (CERO PARPADEO)
+        # Canvas Persistente
         canvas = tk.Canvas(card, bg="#141414", highlightthickness=0)
         canvas.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
@@ -181,7 +298,8 @@ class NativeSnakeVisualizer:
             'frame': card,
             'canvas': canvas,
             'lbl_title': lbl_title,
-            'lbl_info': lbl_info
+            'lbl_info': lbl_info,
+            'btn_close_card': btn_close_card
         }
         self.card_widgets[g_id] = widgets
         return widgets
@@ -202,8 +320,8 @@ class NativeSnakeVisualizer:
         side = g_data.get('side', 'A')
         board_str = g_data.get('board', '')
         remaining_moves = g_data.get('remaining_moves', 300)
+        finished = g_data.get('finished', False)
 
-        # Determinar quién es quién (TÚ vs RIVAL)
         is_my_turn_a = (side == 'A')
         my_name = p1 if is_my_turn_a else p2
         my_score = s1 if is_my_turn_a else s2
@@ -213,7 +331,6 @@ class NativeSnakeVisualizer:
         opp_name = p2 if is_my_turn_a else p1
         opp_score = s2 if is_my_turn_a else s1
         opp_mult = m2 if is_my_turn_a else m1
-        opp_color_name = "AZUL" if is_my_turn_a else "VERDE"
 
         diff = my_score - opp_score
         if diff > 0:
@@ -226,18 +343,18 @@ class NativeSnakeVisualizer:
             status_txt = "⚖️ EMPATE (0 pts)"
             status_fg = "#FFD700"
 
-        # Encabezado con información detallada de turnos e identidad
+        if finished:
+            status_txt = f"🏁 PARTIDA FINALIZADA | {status_txt}"
+
         title_text = f"🎮 {p1} ({s1} pts | x{m1})  vs  {p2} ({s2} pts | x{m2})"
-        info_text = f"👤 TÚ: {my_name} ({my_color_name}) | ⏳ Turnos restantes: {remaining_moves}/300 | Estado: {status_txt}"
+        info_text = f"👤 TÚ: {my_name} ({my_color_name}) | ⏳ Turnos restantes: {remaining_moves}/300 | {status_txt}"
 
         widgets['lbl_title'].config(text=title_text)
         widgets['lbl_info'].config(text=info_text, fg=status_fg)
 
-        # -------------------------------------------------------------
-        # Dibujar Tablero en el Canvas sin destruir el widget
-        # -------------------------------------------------------------
+        # Canvas Rendering
         canvas = widgets['canvas']
-        canvas.delete("all")  # Limpia los elementos gráficos anteriores instantáneamente sin parpadeo
+        canvas.delete("all")
 
         lines = [line.strip() for line in board_str.splitlines() if line.strip()]
         if not lines:
@@ -267,48 +384,42 @@ class NativeSnakeVisualizer:
                 x2 = x1 + cell_size
                 y2 = y1 + cell_size
 
-                color = "#181818"  # Fondo espacio libre
+                color = "#181818"
                 outline = "#2A2A2A"
 
                 is_my_head = False
                 is_opp_head = False
 
                 if char == 'A':
-                    color = "#00FF66"  # Cabeza A
+                    color = "#00FF66"
                     if side == 'A': is_my_head = True
                     else: is_opp_head = True
                 elif char == 'a':
-                    color = "#00B347"  # Cuerpo a
+                    color = "#00B347"
                 elif char == 'B':
-                    color = "#00E5FF"  # Cabeza B
+                    color = "#00E5FF"
                     if side == 'B': is_my_head = True
                     else: is_opp_head = True
                 elif char == 'b':
-                    color = "#0099B8"  # Cuerpo b
+                    color = "#0099B8"
                 elif char in ('x', 'X'):
-                    color = "#E040FB"  # Multiplicador 'X' (Púrpura)
+                    color = "#E040FB"
                 elif char == '#':
-                    color = "#FF1744"  # Paredes dinámicas v5 (Rojo Carmesí)
+                    color = "#FF1744"
 
-                # Dibujar celda principal
                 canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline=outline)
 
-                # Pared dinámica de la regla v5 (#)
                 if char == '#':
                     canvas.create_line(x1, y1, x2, y2, fill="#FFFFFF", width=1)
                     canvas.create_line(x1, y2, x2, y1, fill="#FFFFFF", width=1)
 
-                # Destacar las cabezas con marcas distintas para saber cuál eres tú
                 if is_my_head:
-                    # Borde dorado reluciente para TU cabeza
                     canvas.create_rectangle(x1+1, y1+1, x2-1, y2-1, outline="#FFD700", width=2)
                     canvas.create_text(x1 + cell_size//2, y1 + cell_size//2, text="👑", font=("Segoe UI", max(7, cell_size//2)))
                 elif is_opp_head:
-                    # Marca de rival
                     canvas.create_rectangle(x1+1, y1+1, x2-1, y2-1, outline="#FF1744", width=2)
                     canvas.create_text(x1 + cell_size//2, y1 + cell_size//2, text="💀", font=("Segoe UI", max(7, cell_size//2)))
 
-                # Números de comida cíclica 1..9 (v3)
                 if char.isdigit():
                     canvas.create_rectangle(x1+1, y1+1, x2-1, y2-1, fill="#FFD700", outline="#B8860B")
                     canvas.create_text(x1 + cell_size//2, y1 + cell_size//2, text=char, fill="#000000", font=("Segoe UI", max(8, cell_size//2), "bold"))
@@ -353,7 +464,7 @@ class NativeSnakeVisualizer:
                 self.rebuild_layout()
 
         num_g = len(self.games)
-        self.status_bar.config(text=f"🟢 {num_g} pelea(s) en vivo transmitiendo a 60fps sin parpadeos.")
+        self.status_bar.config(text=f"🟢 {num_g} pelea(s) activa(s) | Usa ❌ en las pestañas para cerrar partidas terminadas o 'Limpiar Terminadas'.")
 
     def _start_ipc_server(self):
         def server_loop():
