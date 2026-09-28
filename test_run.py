@@ -411,13 +411,13 @@ class TestRulesV2V3V4(unittest.TestCase):
         move_low = run.choose_smart_snake_direction(board_low, side='A', game_id='g_prio_low')
         self.assertEqual(move_low, 'left')
 
-        # 2. Con dígito alto 7 cercano (4 casillas) y multiplicador X cerca -> Preferir dígito alto 7
+        # 2. En Fase 2 (my_multiplier >= 10), preferir el dígito activo (7) sobre multiplicadores lejanos
         board_high = (
             "|............|\n"
             "|..X..A...7..|\n"
             "|............|\n"
         )
-        move_high = run.choose_smart_snake_direction(board_high, side='A', game_id='g_prio_high')
+        move_high = run.choose_smart_snake_direction(board_high, side='A', game_id='g_prio_high', my_multiplier=10)
         self.assertEqual(move_high, 'right')
 
 
