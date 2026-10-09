@@ -126,16 +126,24 @@ class NativeSnakeVisualizer:
 
     def remove_game(self, game_id):
         """Elimina una partida individual de la vista y limpia sus recursos."""
-        if game_id in self.games:
-            del self.games[game_id]
-
         if game_id in self.tab_frames:
-            self.tab_frames[game_id].destroy()
+            info = self.tab_frames[game_id]
+            if isinstance(info, dict) and 'container' in info:
+                info['container'].destroy()
+            elif hasattr(info, 'destroy'):
+                info.destroy()
             del self.tab_frames[game_id]
 
         if game_id in self.card_widgets:
-            self.card_widgets[game_id]['frame'].destroy()
+            card_info = self.card_widgets[game_id]
+            if isinstance(card_info, dict) and 'frame' in card_info:
+                card_info['frame'].destroy()
+            elif hasattr(card_info, 'destroy'):
+                card_info.destroy()
             del self.card_widgets[game_id]
+
+        if game_id in self.games:
+            del self.games[game_id]
 
         # Si la partida cerrada era la activa, volver a GRID o a otra disponible
         if self.active_game_id == game_id:

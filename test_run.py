@@ -249,6 +249,15 @@ class TestPlay(InTempDirTestCase, unittest.IsolatedAsyncioTestCase):
             [{'action': 'accept_challenge', 'data': {'challenge_id': 'c_1'}}],
         )
 
+    async def test_blocked_opponent_challenge_is_ignored(self):
+        websocket = FakeWebSocket([
+            {'event': 'challenge', 'data': {'challenge_id': 'c_1', 'opponent': 'Jigglypuff'}},
+        ])
+
+        await run.play(websocket)
+
+        self.assertEqual(websocket.sent, [], "El desafío de Jigglypuff debe ser ignorado/bloqueado")
+
     async def test_your_turn_answers_with_a_move(self):
         websocket = FakeWebSocket([
             {
@@ -421,7 +430,38 @@ class TestRulesV2V3V4(unittest.TestCase):
         self.assertEqual(move_high, 'right')
 
 
+class TestRulesV7(unittest.TestCase):
+
+    def test_v7_collapsed_tail_food_parsing(self):
+        # A tiene en el tablero comida Ⓐ (de rival B colapsado) y Ⓑ (de su propio colapso)
+        board_str = (
+            "|............|\n"
+            "|...A..Ⓐ...Ⓑ.|\n"
+            "|............|\n"
+        )
+        parsed_a = run.parse_official_snake_board(board_str, my_side='A')
+        # Para A, Ⓐ es opp_tail_food (comida rival) y Ⓑ es own_deny_food
+        self.assertIn((6, 1), parsed_a['opp_tail_food'])
+        self.assertIn((10, 1), parsed_a['own_deny_food'])
+
+        parsed_b = run.parse_official_snake_board(board_str, my_side='B')
+        # Para B, Ⓑ es opp_tail_food y Ⓐ es own_deny_food
+        self.assertIn((10, 1), parsed_b['opp_tail_food'])
+        self.assertIn((6, 1), parsed_b['own_deny_food'])
+
+    def test_v7_direction_prioritizes_rival_tail_food(self):
+        # A tiene a la derecha comida de cola rival Ⓐ y a la izquierda una manzana *
+        board_str = (
+            "|............|\n"
+            "|..*..A...Ⓐ..|\n"
+            "|............|\n"
+        )
+        move = run.choose_smart_snake_direction(board_str, side='A', game_id='g_v7_tail')
+        self.assertEqual(move, 'right')
+
+
 if __name__ == '__main__':
     unittest.main()
+
 
 

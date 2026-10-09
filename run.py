@@ -161,6 +161,9 @@ async def start(auth_token):
             time.sleep(3)
 
 
+BLOCKED_OPPONENTS = {'jigglypuff', 'jiglypuf', 'jiggly'}
+
+
 async def play(websocket):
     while True:
         try:
@@ -179,14 +182,17 @@ async def play(websocket):
                     log_event(game_id, request_data)
                     write_game_log(game_id)
             if request_data['event'] == 'challenge':
-                # if request_data['data']['opponent'] == 'favoriteopponent':
-                await send(
-                    websocket,
-                    'accept_challenge',
-                    {
-                        'challenge_id': request_data['data']['challenge_id'],
-                    },
-                )
+                opponent = str(request_data.get('data', {}).get('opponent', '')).lower()
+                if any(blocked in opponent for blocked in BLOCKED_OPPONENTS):
+                    print(f"[BLOQUEADO] Desafío ignorado del usuario no autorizado: {opponent}")
+                else:
+                    await send(
+                        websocket,
+                        'accept_challenge',
+                        {
+                            'challenge_id': request_data['data']['challenge_id'],
+                        },
+                    )
             if request_data['event'] == 'your_turn':
                 log_event(request_data['data']['game_id'], request_data)
                 await process_your_turn(websocket, request_data)
@@ -223,10 +229,14 @@ async def process_move(websocket, request_data):
     board_size = data.get('board_size')
     m1 = data.get('multiplier_1', 1)
     m2 = data.get('multiplier_2', 1)
+    s1 = data.get('score_1', 0)
+    s2 = data.get('score_2', 0)
     my_multiplier = m1 if side == 'A' else m2
+    my_score = s1 if side == 'A' else s2
+    opp_score = s2 if side == 'A' else s1
 
     snake_move = choose_smart_snake_direction(
-        board, side, game_id=game_id, board_size=board_size, my_multiplier=my_multiplier)
+        board, side, game_id=game_id, board_size=board_size, my_multiplier=my_multiplier, my_score=my_score, opp_score=opp_score)
 
     move = {
         'game_id': game_id,
@@ -302,6 +312,12 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
     multipliers = []
     digits_found = {}  # {digit_int: (x, y)}
 
+    # v7: Comida de cola colapsada (Ⓐ o Ⓑ)
+    opp_tail_food_set = {'Ⓐ', '\u24b6'} if my_head_char == 'A' else {'Ⓑ', '\u24b7'}
+    own_deny_food_set = {'Ⓑ', '\u24b7'} if my_head_char == 'A' else {'Ⓐ', '\u24b6'}
+    opp_tail_food = []
+    own_deny_food = []
+
     for y, raw_line in enumerate(lines):
         clean_line = raw_line
         if clean_line.startswith('|'):
@@ -314,6 +330,10 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
                 apples.append((x, y))
             elif char in ('x', 'X'):
                 multipliers.append((x, y))
+            elif char in opp_tail_food_set:
+                opp_tail_food.append((x, y))
+            elif char in own_deny_food_set:
+                own_deny_food.append((x, y))
             elif char.isdigit() and char != '0':
                 digit_val = int(char)
                 digits_found[digit_val] = (x, y)
@@ -371,8 +391,13 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
                 bad_digits.add(pos)
                 obstacles.add(pos)  # Dígitos incorrectos en la secuencia actúan como obstáculos mortales (-500 pts)
 
-    # Prioridad estricta de objetivos: Dígito en secuencia v3 primero (miles de pts), luego multiplicadores 'X', luego manzanas *
-    all_targets = target_apples + multipliers + apples
+    # v7: Prioridad estricta de objetivos:
+    # 1. Comida de cola rival (Ⓐ/Ⓑ) -> +100 pts x multiplicador + crecimiento
+    # 2. Dígito en secuencia v3 (1..9) -> Miles de pts
+    # 3. Multiplicadores 'X' -> Permanente +50 pts y sube multiplicador
+    # 4. Manzanas normales '*'
+    # 5. Denegación de cola propia colapsada (pisarla para borrarla si el rival está cerca)
+    all_targets = opp_tail_food + target_apples + multipliers + apples + own_deny_food
 
     if head_pos is None:
         head_pos = (0, 0)
@@ -389,7 +414,9 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
         'opp_body': opp_body,
         'obstacles': obstacles,
         'apples': all_targets,
-        'target_pos': target_apples[0] if target_apples else None,
+        'target_pos': opp_tail_food[0] if opp_tail_food else (target_apples[0] if target_apples else None),
+        'opp_tail_food': opp_tail_food,
+        'own_deny_food': own_deny_food,
         'multipliers': multipliers,
         'bad_digits': bad_digits,
         'target_digit': target_digit,
@@ -456,18 +483,20 @@ def count_escape_corridors(start_pos, obstacles, width, height):
     return len(reachables), open_exits
 
 
-def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=None, my_multiplier=1):
+def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=None, my_multiplier=1, my_score=0, opp_score=0):
     """
-    Algoritmo de Inteligencia Artificial Avanzada Dual (Ofensivo y Defensivo):
-    1. Prevención estricta de giros de 180° sobre su propio cuello.
-    2. Detección Defensiva de Encierro y Zonas de Estrangulamiento (Choke Points).
-    3. Estrategia Ofensiva de Estrangulamiento: Si movernos a una posición recorta el espacio rival < su longitud, realiza el ATAQUE DE ENCIERRO.
-    4. Estrategia en 2 Fases:
-       - FASE 1 (Multiplicador < 10): Prioridad masiva a multiplicadores 'X' para elevar ganancia temprana.
-       - FASE 2 (Multiplicador >= 10): Caza voraz de todos los dígitos en secuencia (1..9) indiferente de su valor, comiendo 'X' de paso si está cerca (<= 4 pasos).
-    5. Evita colisiones de cabeza vulnerables con el rival a menos que seamos más largos.
-    6. Modo Supervivencia Seguimiento de Cola (Tail-Following) si la manzana es peligrosa.
+    Algoritmo de Inteligencia Artificial Avanzada Dual v7 (Ofensivo y Defensivo):
+    1. Prevención estricta de giros de 180° sobre su propio cuello y evitación de choques.
+    2. Caza Prioritaria de Cola Rival Colapsada (Ⓐ/Ⓑ) -> +100 pts x multiplicador por casilla (Modo Buitre Blitz).
+    3. Detección Defensiva de Encierro y Zonas de Estrangulamiento (Choke Points).
+    4. Estrategia Ofensiva de Estrangulamiento: Si movernos a una posición recorta el espacio rival < su longitud, realiza el ATAQUE DE ENCIERRO.
+    5. Estrategia en Fases:
+       - FASE 1 (Multiplicador < 5): Caza agresiva de 'X' para elevar ganancia temprana.
+       - FASE 2 (Multiplicador >= 5): Caza voraz de cola rival y dígitos en secuencia (1..9), y comer 'X' de paso si está cerca.
+    6. Denegación de Cola Propia (Deny): Pisarla si el rival está cerca para destruirla y evitar que sume puntos gratis.
+    7. Modo Supervivencia Seguimiento de Cola (Tail-Following) si el área es peligrosa.
     """
+
     parsed = parse_official_snake_board(
         board_str, side, board_size=board_size, game_id=game_id)
     head_x, head_y = parsed['head']
@@ -478,6 +507,8 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
     obstacles = parsed['obstacles']
     apples = parsed['apples']
     multipliers_set = set(parsed.get('multipliers', []))
+    opp_tail_food_set = set(parsed.get('opp_tail_food', []))
+    own_deny_food_set = set(parsed.get('own_deny_food', []))
     width = parsed['width']
     height = parsed['height']
 
@@ -567,11 +598,12 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
         return best_trap_move
 
     target_pos = parsed.get('target_pos')
+    target_digit = parsed.get('target_digit')
 
     # Estrategia Dinámica Dual por Fases de Multiplicador:
-    # FASE 1 (my_multiplier < 10): Crecimiento inicial -> Priorizar multiplicadores 'X' masivamente.
-    # FASE 2 (my_multiplier >= 10): Voracidad de Secuencia -> Priorizar TODOS los dígitos (1 al 9) indiferente del valor, y comer 'X' solo "de paso" si está cerca (my_d <= 4).
-    is_phase_1 = (my_multiplier < 10)
+    # FASE 1 (my_multiplier < 5): Crecimiento inicial -> Priorizar multiplicadores 'X' para alcanzar x5 rápidamente.
+    # FASE 2 (my_multiplier >= 5): Voracidad de Secuencia -> Priorizar MÁXIMAMENTE todos los dígitos (1 al 9) indiferente del valor, y comer 'X' "de paso" si está cerca (my_d <= 4).
+    is_phase_1 = (my_multiplier < 5)
 
     candidate_apples = []
     for a in apples:
@@ -586,41 +618,68 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
                 opp_d = len(opp_p)
 
         is_target_digit = (target_pos and a == target_pos)
+        is_opp_tail = (a in opp_tail_food_set)
+        is_own_deny = (a in own_deny_food_set)
 
         race_penalty = 0
         target_bonus = 0
         multiplier_bonus = 0
+        opp_tail_bonus = 0
+        own_deny_bonus = 0
 
-        if is_target_digit:
-            if is_phase_1:
-                # En Fase 1 (< x10): Dígitos bajos o lejanos dan prioridad a 'X'. Si está muy cerca (<=3), comerlo.
-                target_bonus = 5
+        if is_opp_tail:
+            # v7: Modo Buitre Blitz - Comida de cola rival tras colapso (+100 pts x multiplicador + crecimiento)
+            # ALTA PRIORIDAD DE CAZA ABSOLUTA
+            opp_tail_bonus = 120
+            if my_d <= 10:
+                opp_tail_bonus = 150
+            if opp_head and opp_d < my_d:
+                race_penalty = 5
+        elif is_own_deny:
+            # v7: Denegación de cola propia colapsada (si el rival está cerca y estamos a <= 4 pasos, pisarla para borrarla)
+            if opp_head and my_d <= 4:
+                own_deny_bonus = 35
+        elif is_target_digit:
+            if is_phase_1 and target_digit in (1, 2, 3):
+                # En Fase 1 (< x5), solo dígitos muy bajos (1, 2, 3) dan prioridad a 'X'. Si está muy cerca (<= 3), comerlo.
+                target_bonus = 10
                 if my_d <= 3:
-                    target_bonus = 15
+                    target_bonus = 25
+            elif target_digit in (7, 8, 9):
+                # ALTA PRIORIDAD POTENCIADA a dígitos 7, 8 y 9 (otorgan miles de pts por movimiento con multiplicador alto)
+                target_bonus = 75
+                if my_d <= 8:
+                    target_bonus = 95
+                if my_multiplier >= 5:
+                    target_bonus += 20
+                if opp_head and opp_d < my_d:
+                    race_penalty = 8
             else:
-                # En Fase 2 (>= x10): MÁXIMA PRIORIDAD A TODOS LOS DÍGITOS (1 al 9) indiferente del valor
-                target_bonus = 35
-                if my_d <= 7:
-                    target_bonus = 45
+                # MÁXIMA PRIORIDAD a todos los dígitos de la secuencia (1 al 9).
+                target_bonus = 45
+                if my_d <= 8:
+                    target_bonus = 60
 
                 if opp_head and opp_d < my_d:
                     race_penalty = 15
 
         elif a in multipliers_set:
             if is_phase_1:
-                # Fase 1 (< x10): Caza agresiva de 'X' para llegar a x10 rápidamente
-                multiplier_bonus = 25
+                # Fase 1 (< x5): Caza ultragresiva de 'X' para llegar a x5 rápidamente
+                multiplier_bonus = 40
+                if my_d <= 6:
+                    multiplier_bonus = 55
             else:
-                # Fase 2 (>= x10): Solo comer 'X' si está "de paso" o muy cerca (my_d <= 4)
+                # Fase 2 (>= x5): Solo comer 'X' si está "de paso" o muy cerca (my_d <= 4)
                 if my_d <= 4:
-                    multiplier_bonus = 15
+                    multiplier_bonus = 22
                 else:
-                    multiplier_bonus = 2
+                    multiplier_bonus = 5
 
             if opp_head and opp_d < my_d:
-                race_penalty = 10
+                race_penalty = 8
 
-        effective_dist = my_d + race_penalty - target_bonus - multiplier_bonus
+        effective_dist = my_d + race_penalty - target_bonus - multiplier_bonus - opp_tail_bonus - own_deny_bonus
         candidate_apples.append((effective_dist, a, path))
 
     candidate_apples.sort(key=lambda x: x[0])
@@ -639,7 +698,7 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
                     LAST_MOVES[game_id] = first_move
                     return first_move
 
-    # 3. Modo Supervivencia: Intentar seguir la propia cola (Tail-Following)
+    # 3. Modo Supervivencia Defensivo: Intentar seguir la propia cola (Tail-Following) de forma 100% segura
     if tail_pos != (head_x, head_y):
         obstacles_no_tail = set(obstacles)
         obstacles_no_tail.discard(tail_pos)
@@ -662,10 +721,15 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
 
         if tail_path and len(tail_path) > 0:
             first_move = tail_path[0]
-            LAST_MOVES[game_id] = first_move
-            return first_move
+            # Verificar que el primer movimiento hacia la cola no sea una colisión frontal suicida
+            for dx, dy, move_name, pos in valid_moves:
+                if move_name == first_move:
+                    is_head_danger = (pos in opp_next_moves) and (snake_len <= opp_len)
+                    if not is_head_danger:
+                        LAST_MOVES[game_id] = first_move
+                        return first_move
 
-    # 4. Desempate final: Priorizar la casilla con mayor área libre, salidas y penalizar colisiones o bordes
+    # 4. Desempate final: Priorizar la casilla con mayor área libre, salidas abiertas y evitar esquinas atascadas
     best_move = valid_moves[0][2]
     best_score = -999999
 
@@ -674,17 +738,19 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
             pos, obstacles, width, height)
         border_penalty = 0
         if pos[0] == 0 or pos[0] == width - 1 or pos[1] == 0 or pos[1] == height - 1:
-            border_penalty = 2
+            border_penalty = 5
 
         head_danger_penalty = 0
         if (pos in opp_next_moves) and (snake_len <= opp_len):
-            head_danger_penalty = 50
+            head_danger_penalty = 100
 
         choke_penalty = 0
-        if open_exits <= 1 or space < snake_len * 2:
-            choke_penalty = 80
+        if open_exits == 0:
+            choke_penalty = 300
+        elif open_exits == 1 or space < snake_len * 2:
+            choke_penalty = 120
 
-        score = (space * 10) + (open_exits * 5) - border_penalty - \
+        score = (space * 15) + (open_exits * 10) - border_penalty - \
             head_danger_penalty - choke_penalty
         if score > best_score:
             best_score = score
