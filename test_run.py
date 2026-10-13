@@ -460,6 +460,44 @@ class TestRulesV7(unittest.TestCase):
         self.assertEqual(move, 'right')
 
 
+class TestTacticsClankerAnalysis(unittest.TestCase):
+
+    def test_avoid_taking_1_and_2(self):
+        # A en (6, 1). Dígito 1 a la derecha en (9, 1) [dist 3]. Manzana * a la izquierda en (2, 1) [dist 4].
+        # El bot debe penalizar el dígito 1 y preferir no buscarlo, eligiendo ir hacia la izquierda (*).
+        board_str = (
+            "|............|\n"
+            "|..*...A..1..|\n"
+            "|............|\n"
+        )
+        move = run.choose_smart_snake_direction(board_str, side='A', game_id='g_avoid_1')
+        self.assertEqual(move, 'left')
+
+    def test_multiplier_active_high_points_priority(self):
+        # Con multiplicador x3 activo, la serpiente A tiene una manzana * a dist 2 (izq) y el dígito 8 a dist 4 (der).
+        # Jamás ignora el punto alto 8: lo prioriza brutalmente sobre la manzana cercana.
+        board_str = (
+            "|..............|\n"
+            "|...*..A...8...|\n"
+            "|..............|\n"
+        )
+        move = run.choose_smart_snake_direction(board_str, side='A', game_id='g_high_prio', my_multiplier=3)
+        self.assertEqual(move, 'right')
+
+    def test_large_snake_constricts_opponent(self):
+        # Serpiente A grande (longitud 7) tiene al rival B en una esquina/bolsa.
+        # A debe elegir el movimiento 'up' que encierra/sofoca a B sellando la salida.
+        board_str = (
+            "|####..........|\n"
+            "|#B.#..........|\n"
+            "|#..#..........|\n"
+            "|##Aaaaaa......|\n"
+            "|..............|\n"
+        )
+        move = run.choose_smart_snake_direction(board_str, side='A', game_id='g_constrict')
+        self.assertEqual(move, 'up')
+
+
 if __name__ == '__main__':
     unittest.main()
 
