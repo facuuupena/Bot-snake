@@ -1,7 +1,9 @@
 [run]
-source = .
+source =
+    run
+    snake
+relative_files = True
 omit =
-    gui_visualizer.py
     test_*.py
 
 [report]
