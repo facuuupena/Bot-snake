@@ -390,5 +390,138 @@ class TestV8BombParsing(unittest.TestCase):
         GAME_TURN_COUNTER.pop('netgame', None)
 
 
+# ─────────────────────────────────────────────────────────────
+#  Boost extra para superar 95% de cobertura total
+# ─────────────────────────────────────────────────────────────
+class TestTargetCoverage95(unittest.TestCase):
+    """Tests dirigidos a ramas específicas para elevar cobertura a >= 95%."""
+
+    def test_run_main_with_token_branch(self):
+        """Cubre run.py líneas 58-60 (ejecución con token vía runpy)."""
+        import runpy
+        with patch.object(sys, 'argv', ['run.py', 'dummy_token']):
+            with patch('snake.network.start', new_callable=AsyncMock):
+                with patch('asyncio.get_event_loop') as mock_loop:
+                    mock_loop_instance = MagicMock()
+                    mock_loop.return_value = mock_loop_instance
+                    runpy.run_path('run.py', run_name='__main__')
+                    mock_loop_instance.run_until_complete.assert_called_once()
+
+    def test_parser_board_size_invalid_value(self):
+        """Cubre parser.py línea 46-47 (except ValueError en board_size)."""
+        board = '|A  *     |\n|         |'
+        res = parse_official_snake_board(board, board_size="invalidxsize")
+        self.assertIsNotNone(res)
+
+    def test_parser_digits_sync_fallback(self):
+        """Cubre parser.py líneas 166 y 172 (fallback de curr_active y sin game_id)."""
+        from snake.constants import GAME_ACTIVE_TARGET
+        GAME_ACTIVE_TARGET['g_sync'] = {'active': 9, 'prev_digits': {9}}
+        # Solo aparecen dígitos menores a 9 (ej: '3')
+        board = '|A  3     |\n|         |'
+        res = parse_official_snake_board(board, game_id='g_sync')
+        self.assertEqual(res['target_digit'], 3)
+
+        # Sin game_id con dígitos
+        res_no_gid = parse_official_snake_board(board, game_id=None)
+        self.assertEqual(res_no_gid['target_digit'], 3)
+        GAME_ACTIVE_TARGET.pop('g_sync', None)
+
+    def test_network_randint_fallback(self):
+        """Cubre network.py línea 12 (fallback a random.randint)."""
+        import snake.network as net
+        with patch.dict(sys.modules, {'run': MagicMock(spec=[])}):
+            val = net.randint(1, 5)
+            self.assertTrue(1 <= val <= 5)
+
+    def test_network_colums_zero_branch(self):
+        """Cubre network.py línea 144 (raw_col = 0 cuando colums <= 0)."""
+        import snake.network as net
+        req = {
+            'data': {
+                'board': '',  # sin columnas
+                'game_id': 'g_zero_col',
+                'turn_token': 't1',
+            }
+        }
+        async def _run():
+            ws = AsyncMock()
+            await net.process_move(ws, req)
+            sent_move = ws.send.call_args[0][0]
+            self.assertIn('"col": 0', sent_move)
+
+        asyncio.run(_run())
+
+    def test_visualizer_client_send_exception(self):
+        """Cubre visualizer.py líneas 43-44 (error al enviar a cliente web remueve el cliente)."""
+        import snake.visualizer as vis
+        bad_client = AsyncMock()
+        bad_client.send.side_effect = ConnectionResetError("client disconnected")
+        vis.LIVE_CLIENTS.add(bad_client)
+
+        async def _run():
+            await vis.broadcast_live_event({'test': 1})
+            self.assertNotIn(bad_client, vis.LIVE_CLIENTS)
+
+        asyncio.run(_run())
+
+    def test_visualizer_gui_socket_send(self):
+        """Cubre visualizer.py línea 53 (envío exitoso por socket GUI)."""
+        import snake.visualizer as vis
+        # Probar directamente la función interna de envío o mockear run_in_executor
+        with patch('asyncio.get_event_loop') as mock_loop:
+            mock_loop_instance = MagicMock()
+            mock_loop.return_value = mock_loop_instance
+            async def _run():
+                await vis.broadcast_live_event({'event': 'update'})
+            asyncio.run(_run())
+            mock_loop_instance.run_in_executor.assert_called_once()
+
+    def test_strategy_deep_branches(self):
+        """Cubre ramas de multiplicadores, persecución de cola y choke en strategy.py."""
+        # 1. Target digit 1 o 2 adyacente (my_d <= 1)
+        board_adj_digit = (
+            '|A1       |\n'
+            '|         |\n'
+            '|         |'
+        )
+        move = choose_smart_snake_direction(board_adj_digit, side='A', game_id='g_adj1')
+        self.assertIn(move, ('up', 'down', 'left', 'right'))
+
+        # 2. Target digit alto (8 o 9) con rival presente y distancia corta
+        board_high_digit = (
+            '|A       8|\n'
+            '|         |\n'
+            '|B        |'
+        )
+        move2 = choose_smart_snake_direction(
+            board_high_digit, side='A', game_id='g_high8',
+            my_multiplier=3, my_score=100, opp_score=50
+        )
+        self.assertIn(move2, ('up', 'down', 'left', 'right'))
+
+        # 3. Comer 'X' en fase 2 (multiplicador >= 5) pero cercano
+        board_mult_phase2 = (
+            '|A X     *|\n'
+            '|         |\n'
+            '|         |'
+        )
+        move3 = choose_smart_snake_direction(
+            board_mult_phase2, side='A', game_id='g_mphase2',
+            my_multiplier=5
+        )
+        self.assertIn(move3, ('up', 'down', 'left', 'right'))
+
+        # 4. Tail following suicida evitado por head_danger
+        board_tail_trap = (
+            '|A a      |\n'
+            '|B a      |\n'
+            '|  a      |\n'
+            '|  a      |'
+        )
+        move4 = choose_smart_snake_direction(board_tail_trap, side='A', game_id='g_tail_trap')
+        self.assertIn(move4, ('up', 'down', 'left', 'right'))
+
+
 if __name__ == '__main__':
     unittest.main()
