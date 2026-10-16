@@ -1,8 +1,19 @@
 """
-Parseador del tablero oficial del juego Snake (v1 a v7).
+Parseador del tablero oficial del juego Snake (v1 a v8).
 Convierte la representación de texto en estructuras de datos con posiciones y obstáculos.
+Soporte v8: detecta bombas 💣 (gran, zona 5×5) y 🧨 (chica, zona 3×3) y calcula
+las celdas de peligro de explosión mediante distancia Chebyshev.
 """
-from snake.constants import GAME_ACTIVE_TARGET, GAME_TARGET_DIGITS
+from snake.constants import (
+    GAME_ACTIVE_TARGET,
+    GAME_TARGET_DIGITS,
+    BOMB_LARGE,
+    BOMB_SMALL,
+    BOMB_LARGE_RADIUS,
+    BOMB_SMALL_RADIUS,
+    BOMB_DISABLE_ROUND,
+    GAME_TURN_COUNTER,
+)
 
 
 def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=None):
@@ -93,6 +104,10 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
     opp_tail_food = []
     own_deny_food = []
 
+    # v8: Bombas de proximidad
+    bombs_large = []   # 💣 zona Chebyshev ≤ 2 (5×5)
+    bombs_small = []   # 🧨 zona Chebyshev ≤ 1 (3×3)
+
     for y, raw_line in enumerate(lines):
         clean_line = raw_line
         if clean_line.startswith('|'):
@@ -125,6 +140,10 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
                 obstacles.add((x, y))
             elif char == '#':
                 obstacles.add((x, y))  # v5: Pared dinámica '#' (evitación estricta de penalización -500)
+            elif char == BOMB_LARGE:
+                bombs_large.append((x, y))   # v8: 💣 bomba grande
+            elif char == BOMB_SMALL:
+                bombs_small.append((x, y))   # v8: 🧨 bomba chica
 
     # v3: Rastreador de Secuencia Global Cíclica (Dígitos 1 a 9)
     target_digit = None
@@ -183,6 +202,20 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
 
     tail_pos = my_body[-1] if my_body else head_pos
 
+    # v8: Calcular celdas de peligro de explosión (Chebyshev)
+    # Solo mientras no hayan pasado BOMB_DISABLE_ROUND turnos (ronda 150)
+    bomb_danger_cells = set()
+    turn = GAME_TURN_COUNTER.get(game_id, 0) if game_id else 0
+    if turn < BOMB_DISABLE_ROUND:
+        for bx, by in bombs_large:
+            for dx in range(-BOMB_LARGE_RADIUS, BOMB_LARGE_RADIUS + 1):
+                for dy in range(-BOMB_LARGE_RADIUS, BOMB_LARGE_RADIUS + 1):
+                    bomb_danger_cells.add((bx + dx, by + dy))
+        for bx, by in bombs_small:
+            for dx in range(-BOMB_SMALL_RADIUS, BOMB_SMALL_RADIUS + 1):
+                for dy in range(-BOMB_SMALL_RADIUS, BOMB_SMALL_RADIUS + 1):
+                    bomb_danger_cells.add((bx + dx, by + dy))
+
     return {
         'head': head_pos,
         'body': my_body,
@@ -198,5 +231,9 @@ def parse_official_snake_board(board_str, my_side='A', board_size=None, game_id=
         'bad_digits': bad_digits,
         'target_digit': target_digit,
         'width': max(1, width),
-        'height': max(1, height)
+        'height': max(1, height),
+        # v8: Bombas de proximidad
+        'bombs_large': bombs_large,
+        'bombs_small': bombs_small,
+        'bomb_danger_cells': bomb_danger_cells,
     }

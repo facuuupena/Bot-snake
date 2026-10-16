@@ -2,6 +2,7 @@
 Motor de inteligencia artificial y toma de decisiones para Snake.
 Implementa el algoritmo dual avanzado (ofensivo/defensivo) con BFS, Flood Fill,
 ataque de estrangulamiento/encierro, fases de multiplicadores y seguimiento de cola.
+v8: Evasión de bombas de proximidad 💣/🧨 mediante penalización de zona de peligro.
 """
 from collections import deque
 from snake.constants import LAST_MOVES, OPPOSITE_MOVES
@@ -11,7 +12,7 @@ from snake.parser import parse_official_snake_board
 
 def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=None, my_multiplier=1, my_score=0, opp_score=0):
     """
-    Algoritmo de Inteligencia Artificial Avanzada Dual v7 (Ofensivo y Defensivo):
+    Algoritmo de Inteligencia Artificial Avanzada Dual v8 (Ofensivo y Defensivo):
     1. Prevención estricta de giros de 180° sobre su propio cuello y evitación de choques.
     2. Caza Prioritaria de Cola Rival Colapsada (Ⓐ/Ⓑ) -> +100 pts x multiplicador por casilla (Modo Buitre Blitz).
     3. Detección Defensiva de Encierro y Zonas de Estrangulamiento (Choke Points).
@@ -21,6 +22,8 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
        - FASE 2 (Multiplicador >= 5): Caza voraz de cola rival y dígitos en secuencia (1..9), y comer 'X' de paso si está cerca.
     6. Denegación de Cola Propia (Deny): Pisarla si el rival está cerca para destruirla y evitar que sume puntos gratis.
     7. Modo Supervivencia Seguimiento de Cola (Tail-Following) si el área es peligrosa.
+    8. v8: Evasión de bombas de proximidad 💣/🧨 — filtrado estricto de celdas peligrosas cuando hay alternativas seguras,
+       penalización de -500 en desempate final si todas las opciones son zonas de bomba.
     """
 
     parsed = parse_official_snake_board(
@@ -37,11 +40,14 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
     own_deny_food_set = set(parsed.get('own_deny_food', []))
     width = parsed['width']
     height = parsed['height']
+    # v8: Celdas de peligro de bomba (Chebyshev ≤ radio)
+    bomb_danger_cells = parsed.get('bomb_danger_cells', set())
 
     snake_len = len(my_body) + 1
     opp_len = len(opp_body) + 1
     last_move = LAST_MOVES.get(game_id)
     opposite = OPPOSITE_MOVES.get(last_move) if isinstance(last_move, str) else None
+
 
     moves = [
         (0, -1, 'up'),
@@ -81,6 +87,13 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
                 return move_name
 
         return 'up'
+
+    # v8: Filtrado de bombas — si hay movimientos fuera de zona de peligro, descartar los que están dentro
+    if bomb_danger_cells:
+        safe_moves = [(dx, dy, mn, pos) for dx, dy, mn, pos in valid_moves if pos not in bomb_danger_cells]
+        if safe_moves:
+            valid_moves = safe_moves
+        # Si TODOS los movimientos están en zona de bomba, se conservan todos (elegir el menos malo al final)
 
     # Identificar movimientos probables de la cabeza rival para no regalarnos
     opp_next_moves = set()
@@ -314,8 +327,11 @@ def choose_smart_snake_direction(board_str, side='A', game_id=None, board_size=N
             opp_space = flood_fill_count(opp_head, sim_obstacles, width, height)
             constrict_bonus = max(0, 30 - opp_space) * 8
 
+        # v8: Penalización por zona de bomba (sólo llega aquí si TODOS los movimientos son zonas de bomba)
+        bomb_penalty = 500 if pos in bomb_danger_cells else 0
+
         score = (space * 15) + (open_exits * 10) + constrict_bonus - border_penalty - \
-            head_danger_penalty - choke_penalty
+            head_danger_penalty - choke_penalty - bomb_penalty
         if score > best_score:
             best_score = score
             best_move = move_name

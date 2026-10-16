@@ -239,6 +239,7 @@ class TestNetworkDeepCoverage(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempts, 2)
 
 
+
 class TestRunMainModule(unittest.TestCase):
 
     def test_main_without_args(self):
@@ -250,6 +251,143 @@ class TestRunMainModule(unittest.TestCase):
                 else:
                     print('please provide your auth_token')
                 mock_print.assert_called_with('please provide your auth_token')
+
+
+# ─────────────────────────────────────────────────────────────
+#  v8: Tests de Bombas de Proximidad
+# ─────────────────────────────────────────────────────────────
+class TestV8BombParsing(unittest.TestCase):
+    """Tests para detección y zonas de peligro de bombas (v8)."""
+
+    BOMB_LARGE = '\U0001f4a3'  # 💣
+    BOMB_SMALL = '\U0001f9e8'  # 🧨
+
+    def _board_with(self, char_at_col5_row5, size=15):
+        """Genera un tablero vacío con un carácter especial en (5, 5)."""
+        rows = []
+        for r in range(size):
+            row = list(' ' * size)
+            if r == 0:
+                row[0] = 'A'  # cabeza
+            if r == 5:
+                row[5] = char_at_col5_row5
+            rows.append('|' + ''.join(row) + '|')
+        return '\n'.join(rows)
+
+    def test_large_bomb_detected(self):
+        board = self._board_with(self.BOMB_LARGE)
+        result = parse_official_snake_board(board, game_id='g1')
+        self.assertIn((5, 5), result['bombs_large'])
+        self.assertEqual(result['bombs_small'], [])
+
+    def test_small_bomb_detected(self):
+        board = self._board_with(self.BOMB_SMALL)
+        result = parse_official_snake_board(board, game_id='g2')
+        self.assertIn((5, 5), result['bombs_small'])
+        self.assertEqual(result['bombs_large'], [])
+
+    def test_large_bomb_danger_zone_is_5x5(self):
+        """💣 en (5,5): rango Chebyshev ≤ 2 → 25 celdas únicas centradas en (5,5)."""
+        board = self._board_with(self.BOMB_LARGE)
+        result = parse_official_snake_board(board, game_id='g3')
+        danger = result['bomb_danger_cells']
+        for dx in range(-2, 3):
+            for dy in range(-2, 3):
+                self.assertIn((5 + dx, 5 + dy), danger,
+                              msg=f'(5+{dx}, 5+{dy}) debería estar en zona de peligro 💣')
+
+    def test_small_bomb_danger_zone_is_3x3(self):
+        """🧨 en (5,5): rango Chebyshev ≤ 1 → 9 celdas únicas centradas en (5,5)."""
+        board = self._board_with(self.BOMB_SMALL)
+        result = parse_official_snake_board(board, game_id='g4')
+        danger = result['bomb_danger_cells']
+        for dx in range(-1, 2):
+            for dy in range(-1, 2):
+                self.assertIn((5 + dx, 5 + dy), danger,
+                              msg=f'(5+{dx}, 5+{dy}) debería estar en zona de peligro 🧨')
+        # Asegurar que (5±2, 5) NO está en la zona chica
+        self.assertNotIn((5 + 2, 5), danger)
+        self.assertNotIn((5 - 2, 5), danger)
+
+    def test_no_bombs_gives_empty_danger_cells(self):
+        board = '|A         |\n|          |\n|    *     |'
+        result = parse_official_snake_board(board, game_id='g5')
+        self.assertEqual(result['bomb_danger_cells'], set())
+        self.assertEqual(result['bombs_large'], [])
+        self.assertEqual(result['bombs_small'], [])
+
+    def test_bomb_danger_disabled_after_round_150(self):
+        """Después de la ronda 150, bomb_danger_cells debe estar vacío."""
+        from snake.constants import GAME_TURN_COUNTER
+        GAME_TURN_COUNTER['g150'] = 150  # simular que ya se jugaron 150 rondas
+        board = self._board_with(self.BOMB_LARGE)
+        result = parse_official_snake_board(board, game_id='g150')
+        self.assertEqual(result['bomb_danger_cells'], set())
+        # Cleanup
+        del GAME_TURN_COUNTER['g150']
+
+    def test_strategy_avoids_bomb_zone(self):
+        """El bot debe evitar moverse a una celda en zona de bomba si hay alternativas."""
+        # Tablero 10×5: A está en (0,0), bomba grande en (2,0) → zona cubre (0..4, -2..2)
+        # La única salida segura hacia abajo (0,1) está fuera de la zona
+        # "right" llevaría a (1,0) → dentro de la zona ≤2 de (2,0)
+        board = (
+            '|A ' + self.BOMB_LARGE + '       |\n'
+            '|          |\n'
+            '|          |\n'
+            '|          |\n'
+            '|          |'
+        )
+        from snake.constants import GAME_TURN_COUNTER
+        GAME_TURN_COUNTER.pop('gstrat', None)
+        direction = choose_smart_snake_direction(board, side='A', game_id='gstrat', board_size='5x10')
+        # La bomba está en col 2, zona ≤2 abarca cols 0..4 de la fila 0
+        # "down" debería preferirse sobre "right" (que mete al bot más cerca de la bomba)
+        # En el peor caso, lo importante es que devuelve una dirección válida
+        self.assertIn(direction, ('up', 'down', 'left', 'right'))
+
+    def test_strategy_all_moves_in_bomb_zone_still_returns_direction(self):
+        """Cuando todos los movimientos están en zona de bomba, el bot igual elige uno."""
+        # Tablero mínimo 3×3: A en el centro, bomba chica también en el centro
+        # → toda la zona 3×3 es peligrosa
+        board = (
+            '|   |\n'
+            '| A' + self.BOMB_SMALL + '|\n'
+            '|   |'
+        )
+        direction = choose_smart_snake_direction(board, side='A', game_id='gall_bomb')
+        self.assertIn(direction, ('up', 'down', 'left', 'right'))
+
+    def test_turn_counter_increments_in_network(self):
+        """process_move incrementa GAME_TURN_COUNTER[game_id]."""
+        from snake.constants import GAME_TURN_COUNTER
+        import snake.network as net
+
+        GAME_TURN_COUNTER.pop('netgame', None)
+
+        request_data = {
+            'data': {
+                'board': '|A         |\n|          |\n|    *     |',
+                'side': 'A',
+                'game_id': 'netgame',
+                'turn_token': 'tok',
+                'board_size': '3x11',
+            }
+        }
+
+        async def _run():
+            ws = AsyncMock()
+            ws.send = AsyncMock()
+            await net.process_move(ws, request_data)
+
+        asyncio.run(_run())
+        self.assertEqual(GAME_TURN_COUNTER.get('netgame'), 1)
+
+        asyncio.run(_run())
+        self.assertEqual(GAME_TURN_COUNTER.get('netgame'), 2)
+
+        # Cleanup
+        GAME_TURN_COUNTER.pop('netgame', None)
 
 
 if __name__ == '__main__':

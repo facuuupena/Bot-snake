@@ -11,6 +11,13 @@ from snake.constants import (
     LAST_MOVES,
     GAME_ACTIVE_TARGET,
     GAME_TARGET_DIGITS,
+    # v8: Bombas de proximidad
+    GAME_TURN_COUNTER,
+    BOMB_LARGE,
+    BOMB_SMALL,
+    BOMB_LARGE_RADIUS,
+    BOMB_SMALL_RADIUS,
+    BOMB_DISABLE_ROUND,
 )
 from snake.geometry import (
     clamp_non_negative,

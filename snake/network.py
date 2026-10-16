@@ -16,6 +16,7 @@ from snake.constants import (
     BLOCKED_OPPONENTS,
     HISTORY,
     LOGS_DIR,
+    GAME_TURN_COUNTER,
 )
 from snake.geometry import (
     clamp_non_negative,
@@ -128,6 +129,10 @@ async def process_move(websocket, request_data):
     board = data.get('board', '')
     side = data.get('side', 'A')
     game_id = data.get('game_id', '')
+
+    # v8: Incrementar contador de turnos para deshabilitar bombas tras la ronda 150
+    if game_id:
+        GAME_TURN_COUNTER[game_id] = GAME_TURN_COUNTER.get(game_id, 0) + 1
 
     # 1. Sanear y calcular columnas evitando números negativos (SIEMPRE >= 0)
     colums = sanitize_columns(board)
